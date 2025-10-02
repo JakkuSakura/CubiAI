@@ -1,0 +1,49 @@
+name: anime-default
+description: Default profile targeting anime-style characters with AI-driven layering and rigging.
+segmentation:
+  backend: huggingface-sam
+  num_segments: 14
+  compactness: 8.0
+  min_area_px: 2048
+  feather_radius: 2
+  huggingface:
+    model: facebook/sam-vit-base
+    endpoint: https://api-inference.huggingface.co/models/facebook/sam-vit-base
+    token_env: HF_API_TOKEN
+    max_layers: 14
+    score_threshold: 0.05
+export:
+  psd:
+    enabled: true
+    group_name: CubiAI Layers
+  live2d:
+    enabled: true
+    texture_size: 2048
+    padding: 24
+    background_color: [0, 0, 0, 0]
+rigging:
+  template: humanoid-basic
+  idle_motion: true
+  blink_parameters:
+    - ParamEyeLOpen
+    - ParamEyeROpen
+  strategy: llm
+  llm_model: gpt-4.1-mini
+  llm_base_url: https://api.openai.com/v1
+  llm_api_key_env: OPENAI_API_KEY
+  builder:
+    # Install the Live2D Cubism command line exporter and expose it via $CUBISM_CLI.
+    command:
+      - "${CUBISM_CLI}"
+      - "--psd"
+      - "{PSD_PATH}"
+      - "--rig-config"
+      - "{RIG_JSON}"
+      - "--output"
+      - "{OUTPUT_DIR}"
+    timeout_seconds: 900
+models:
+  assets: []
+metadata:
+  created_by: CubiAI
+  notes: Default profile generated during scaffolding.
