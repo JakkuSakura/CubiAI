@@ -22,6 +22,16 @@ export:
     background_color: [0, 0, 0, 0]
 rigging:
   enabled: false
+annotation:
+  llm:
+    enabled: false
+    model: gpt-5
+    base_url: null
+    api_key_env: OPENAI_API_KEY
+    temperature: 0.2
+    max_output_tokens: 1024
+    timeout_seconds: 180
+    prompt_template: null
 models:
   assets: []
 metadata:

@@ -51,6 +51,16 @@ uv run cubiai process ./input/character.png \
     --output-dir ./build/character
 ```
 
+Generate LLM-assisted LabelMe annotations:
+
+```bash
+uv run cubiai annotate ./input/character.png \
+    --label hair --label face --label clothes \
+    --output ./build/character/character.labelme.json
+```
+
+The command pulls model credentials from the `annotation.llm` section in `config/cubiai.yaml`. Override the model or base URL at runtime using `--model` and `--base-url`, or pass `--embed-image` to inline the image as base64 within the exported JSON.
+
 > **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
 
 Outputs include:

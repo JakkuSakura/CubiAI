@@ -7,7 +7,7 @@ import yaml
 
 from .models import AppConfig
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "cubiai.yaml"
+DEFAULT_CONFIG_PATH =  "config/cubiai.yaml"
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:

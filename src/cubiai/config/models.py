@@ -115,6 +115,43 @@ class RiggingSettings(BaseModel):
     builder: RiggingBuilderSettings | None = None
 
 
+class AnnotationLLMSettings(BaseModel):
+    enabled: bool = Field(default=False, description="Enable LLM-assisted annotation workflow.")
+    model: str = Field(default="gpt-5", description="Chat model identifier passed to the provider.")
+    base_url: str | None = Field(
+        default=None,
+        description="Optional override for the chat completion base URL (for OpenAI-compatible providers).",
+    )
+    api_key_env: str = Field(
+        default="OPENROUTER_API_KEY",
+        description="Environment variable containing the API key used for annotation calls.",
+    )
+    temperature: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature applied to the chat model.",
+    )
+    max_output_tokens: int = Field(
+        default=1024,
+        ge=64,
+        description="Upper bound on tokens generated for the label output.",
+    )
+    timeout_seconds: int = Field(
+        default=180,
+        ge=30,
+        description="Request timeout supplied to the HTTP client.",
+    )
+    prompt_template: str | None = Field(
+        default=None,
+        description="Optional prompt override for generating LabelMe annotations.",
+    )
+
+
+class AnnotationSettings(BaseModel):
+    llm: AnnotationLLMSettings = Field(default_factory=AnnotationLLMSettings)
+
+
 class InlineModelAsset(BaseModel):
     name: str
     path: str
@@ -150,6 +187,7 @@ class AppConfig(BaseModel):
     segmentation: SegmentationSettings = Field(default_factory=SegmentationSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
     rigging: RiggingSettings = Field(default_factory=RiggingSettings)
+    annotation: AnnotationSettings = Field(default_factory=AnnotationSettings)
     models: ModelAssets = Field(default_factory=ModelAssets)
     metadata: ConfigMetadata = Field(default_factory=ConfigMetadata)
 
