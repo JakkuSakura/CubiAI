@@ -9,14 +9,8 @@ from PIL import Image
 from ..errors import MissingDependencyError
 from ..pipeline.artifacts import LayerArtifact
 from ..workspace import Workspace
-
-
-def _create_pixel_layer(psd_layers, image: Image.Image, name: str):
-    if hasattr(psd_layers, "PixelLayer") and hasattr(psd_layers.PixelLayer, "from_pil"):
-        return psd_layers.PixelLayer.from_pil(image, name=name)
-    if hasattr(psd_layers, "Layer") and hasattr(psd_layers.Layer, "from_pil"):
-        return psd_layers.Layer.from_pil(image, name=name)
-    raise RuntimeError("psd-tools API incompatible: expected PixelLayer.from_pil")
+from psd_tools import PSDImage
+from psd_tools.api.layers import Group, PixelLayer
 
 
 class PSDExporter:
@@ -32,23 +26,15 @@ class PSDExporter:
             msg = "No layers available to export as PSD"
             raise ValueError(msg)
 
-        try:
-            from psd_tools.user_api import layers as psd_layers
-            from psd_tools.user_api import psd_image
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingDependencyError(
-                "psd-tools is required to export PSD files. Install with `uv add psd-tools`."
-            ) from exc
-
         canvas_size = layers[0].image.size
-        psd = psd_image.PSDImage.new(mode="RGBA", size=canvas_size, color=(0, 0, 0, 0))
-        group = psd_layers.Group(name=self.group_name)
+        psd = PSDImage.new(mode="RGBA", size=canvas_size, color=(0, 0, 0, 0))
+        group = Group(name=self.group_name)
 
         for artifact in layers:
             pil_image = artifact.image
             if pil_image.size != canvas_size:
                 pil_image = pil_image.resize(canvas_size, Image.LANCZOS)
-            pixel_layer = _create_pixel_layer(psd_layers, pil_image, artifact.name)
+            pixel_layer = PixelLayer.from_image(pil_image, name=artifact.name)
             group.append(pixel_layer)
 
         psd.append(group)

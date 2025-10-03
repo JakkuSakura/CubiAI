@@ -1,6 +1,7 @@
 """Local SAM-HQ segmentation utilities."""
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Iterable, List, Tuple
@@ -47,11 +48,17 @@ class SamHQLocalSegmenter:
         seen_masks: list[np.ndarray] = []
 
         for point in points:
-            inputs = processor(
-                torch_image,
-                input_points=[[point]],
-                return_tensors="pt",
-            ).to(device)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"The following named arguments are not valid for `SamImageProcessor.preprocess`",
+                    category=UserWarning,
+                )
+                inputs = processor(
+                    torch_image,
+                    input_points=[[point]],
+                    return_tensors="pt",
+                ).to(device)
             with torch.no_grad():
                 outputs = model(**inputs)
 
@@ -60,12 +67,24 @@ class SamHQLocalSegmenter:
                 inputs["original_sizes"].cpu(),
                 inputs["reshaped_input_sizes"].cpu(),
             )
-            scores = outputs.iou_scores.cpu().tolist()[0]
+            mask_stack = post_masks[0].detach().cpu().numpy()
+            if mask_stack.ndim == 4:
+                mask_stack = mask_stack[:, 0, ...]
 
-            for mask_tensor, score in zip(post_masks[0], scores):
+            scores = (
+                outputs.iou_scores[0]
+                .detach()
+                .cpu()
+                .reshape(-1)
+                .tolist()
+            )
+
+            for idx, score in enumerate(scores):
+                if idx >= mask_stack.shape[0]:
+                    break
+                mask_array = mask_stack[idx]
                 if score < self.config.score_threshold:
                     continue
-                mask_array = mask_tensor.detach().cpu().numpy().squeeze()
                 if not mask_array.any():
                     continue
                 if _is_duplicate(mask_array, seen_masks):
