@@ -17,9 +17,10 @@ Set the required credentials in your shell session before processing:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-export CUBISM_CLI="/path/to/cubism-cli"
+export CUBISM_CLI="/path/to/cubism-cli"      # optional: required only if rigging is enabled
 # optional: export CUBIAI_SAM_HQ_MODEL to override the transformers model id
 # optional: export CUBIAI_SAM_HQ_DEVICE to force cpu/cuda/mps
+# optional: enable rigging by setting rigging.enabled: true in your config and supplying the above keys
 ```
 
 ## Key Commands
@@ -46,7 +47,7 @@ Summarize outputs from a previous run.
 uv run cubiai inspect ./build/character
 ```
 
-Displays run metadata, stage durations, quality metrics, and validation results. The workspace root contains layered PNGs, `layers.psd`, and a `Live2D/` project folder.
+Displays run metadata, stage durations, quality metrics, and validation results. The workspace root contains numbered PNGs under `png/`, `layers.psd`, and a `Live2D/` project folder.
 
 ### `cubiai models sync`
 Ensure required model weights are present.
@@ -66,7 +67,7 @@ uv run cubiai workspace clean --older-than 14d
 `config/cubiai.yaml` holds all runtime settings (segmentation backend, rigging strategy, builder command, etc.). Duplicate this file if you need project-specific variants and point the CLI at the desired path with `--config`.
 
 ### Rigging Builder
-Define `rigging.builder.command` in your configuration to point at a Live2D-capable exporter. The command is a list; placeholders are replaced automatically:
+Rigging is disabled by default. To enable it, set `rigging.enabled: true` in your configuration and define `rigging.builder.command` to point at a Live2D-capable exporter. The command is a list; placeholders are replaced automatically:
 
 | Placeholder   | Description |
 |---------------|-------------|
@@ -81,6 +82,7 @@ The pipeline stops with a `PipelineStageError` if the resulting `model.moc3` fil
 - `segmentation.num_segments` limits how many masks SAM-HQ keeps.
 - `segmentation.sam_hq_local_score_threshold` filters low-confidence proposals (0–1 range).
 - Override the model/device temporarily with `CUBIAI_SAM_HQ_MODEL` and `CUBIAI_SAM_HQ_DEVICE` environment variables.
+- When rigging remains disabled, the pipeline stops after generating PNG/PSD outputs.
 
 ## Logging & Diagnostics
 - Verbose logs: `--log-level DEBUG`

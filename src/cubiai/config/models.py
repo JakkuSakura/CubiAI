@@ -78,8 +78,12 @@ class PSDExportSettings(BaseModel):
     embed_metadata: bool = True
 
 
-class Live2DSettings(BaseModel):
+class PNGExportSettings(BaseModel):
     enabled: bool = True
+
+
+class Live2DSettings(BaseModel):
+    enabled: bool = False
     texture_size: int = Field(default=2048, description="Width/height of the texture atlas.")
     padding: int = Field(default=24, ge=0, description="Padding between layers in the atlas.")
     background_color: tuple[int, int, int, int] = Field(
@@ -100,30 +104,15 @@ class RiggingBuilderSettings(BaseModel):
 
 
 class RiggingSettings(BaseModel):
-    enabled: bool = True
-    template: str = Field(default="humanoid-basic")
-    idle_motion: bool = Field(default=True)
-    blink_parameters: tuple[str, str] = Field(
-        default=("ParamEyeLOpen", "ParamEyeROpen"),
-        description="Parameter IDs controlling eye openness.",
-    )
-    strategy: Literal["llm", "heuristic"] = Field(
-        default="llm",
-        description="Rigging strategy. 'llm' requires an LLM-backed service for parameter generation.",
-    )
-    llm_model: str = Field(default="gpt-4.1-mini", description="Model identifier for the LLM rigging provider.")
-    llm_base_url: str = Field(
-        default="https://api.openai.com/v1",
-        description="Base URL for the LLM provider compatible with the OpenAI API schema.",
-    )
-    llm_api_key_env: str = Field(
-        default="OPENAI_API_KEY",
-        description="Environment variable name that stores the LLM provider API key.",
-    )
-    builder: RiggingBuilderSettings | None = Field(
-        default=None,
-        description="External Live2D builder/extractor configuration. Required when rigging is enabled.",
-    )
+    enabled: bool = False
+    template: str | None = None
+    idle_motion: bool = False
+    blink_parameters: tuple[str, str] | None = None
+    strategy: Literal["llm", "heuristic"] | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key_env: str | None = None
+    builder: RiggingBuilderSettings | None = None
 
 
 class InlineModelAsset(BaseModel):
@@ -146,6 +135,7 @@ class ModelAssets(BaseModel):
 
 class ExportSettings(BaseModel):
     psd: PSDExportSettings = Field(default_factory=PSDExportSettings)
+    png: PNGExportSettings = Field(default_factory=PNGExportSettings)
     live2d: Live2DSettings = Field(default_factory=Live2DSettings)
 
 

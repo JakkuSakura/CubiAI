@@ -19,6 +19,7 @@ from ..services.llm_rigging import LLMRiggingClient, RiggingLLMError
 from ..services.live2d import Live2DExporter
 from ..services.psd_exporter import PSDExporter
 from ..workspace import Workspace
+from ..workspace import Workspace
 from .context import PipelineContext
 
 
@@ -225,12 +226,45 @@ class PSDExportStage(PipelineStage):
             raise PipelineStageError(stage=self.name, message="No layers available for PSD export")
 
         exporter = PSDExporter(workspace=self.workspace, group_name=self.group_name)
-        psd_path = exporter.export(layers)
+        png_dir = ctx.data.get("png_dir")
+        psd_path = exporter.export(layers, png_dir=png_dir)
         ctx.record_output("psd", psd_path)
         ctx.record_diagnostic(
             self.name,
             {"path": str(psd_path), "layer_count": len(layers)},
         )
+
+
+class PNGExportStage(PipelineStage):
+    name = "PNGExport"
+
+    def __init__(self, workspace: Workspace, enabled: bool = True) -> None:
+        self.workspace = workspace
+        self.enabled = enabled
+        self.logger = logging.getLogger(self.name)
+
+    def run(self, ctx: PipelineContext) -> None:
+        if not self.enabled:
+            ctx.record_diagnostic(self.name, {"status": "skipped"})
+            return
+
+        layers: list[LayerArtifact] = ctx.data.get("layers", [])
+        if not layers:
+            raise PipelineStageError(stage=self.name, message="No layers available for PNG export")
+
+        png_dir = self.workspace.root / "png"
+        png_dir.mkdir(parents=True, exist_ok=True)
+
+        exported: list[str] = []
+        for index, artifact in enumerate(layers, start=1):
+            filename = f"{index:03}.png"
+            output_path = png_dir / filename
+            artifact.image.crop(artifact.bbox).save(output_path)
+            exported.append(str(output_path))
+
+        ctx.data["png_dir"] = png_dir
+        ctx.record_output("png_layers", png_dir)
+        ctx.record_diagnostic(self.name, {"files": exported})
 
 
 class RiggingStage(PipelineStage):
@@ -241,6 +275,9 @@ class RiggingStage(PipelineStage):
         self.logger = logging.getLogger(self.name)
 
     def run(self, ctx: PipelineContext) -> None:
+        if not self.settings.enabled:
+            ctx.record_diagnostic(self.name, {"status": "skipped"})
+            return
         layers: list[LayerArtifact] = ctx.data.get("layers", [])
         if not layers:
             raise PipelineStageError(stage=self.name, message="No layers available for rigging")
@@ -448,6 +485,10 @@ def build_default_stages(config: AppConfig, workspace: Workspace) -> list[Pipeli
     return [
         ImageLoaderStage(workspace=workspace),
         SegmentationStage(settings=config.segmentation, workspace=workspace),
+        PNGExportStage(
+            workspace=workspace,
+            enabled=config.export.png.enabled,
+        ),
         PSDExportStage(
             workspace=workspace,
             enabled=config.export.psd.enabled,

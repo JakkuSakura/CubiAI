@@ -25,23 +25,27 @@ This document breaks down the CubiAI end-to-end pipeline. Each stage is modular 
 - Perform color correction and optional relighting to maintain consistency across layers.
 
 ## 5. PSD Compilation
-- Create a layered PSD where each processed component sits in a named layer or layer group.
+- Rebuild a layered PSD from the numbered PNG stack so the PSD matches exactly what was exported.
 - Embed metadata about layer names, z-order, and segmentation confidence in PSD layer tags.
 - Optional: output additional review artifacts (flattened previews, thumbnails) to accompany the PSD.
 
-## 6. Live2D Asset Generation
-- Invoke the configured builder command (see `rigging.builder.command`) to convert the PSD and AI-generated rig data into a real `model.moc3` file. A missing command or `model.moc3` triggers a hard failure.
+## 6. PNG Archive
+- Write every processed layer to an individual transparent PNG (`png/001.png`, `png/002.png`, …) for quick inspection or manual adjustments.
+- The PNG directory path is recorded in the run metadata for downstream tools.
+
+## 7. Live2D Asset Generation (Optional)
+- When `rigging.enabled` is set to `true`, invoke the configured builder command (see `rigging.builder.command`) to convert the PSD and AI-generated rig data into a real `model.moc3` file. A missing command or `model.moc3` triggers a hard failure.
 - Generate texture atlases for each layer group (textures stored under `Live2D/Resources/Textures`).
 - Build `model3.json` referencing textures, physics settings, motions, and the builder-produced `model.moc3`.
 - Package additional assets (expression JSON, physics graphs, pose configurations). Placeholder physics/motions are written only if the builder does not provide them.
 
-## 7. Rigging Automation
+## 8. Rigging Automation (Optional)
 - Feed layer metadata to the LLM rigging assistant. The assistant must return structured JSON defining parts, deformers, physics, and motion stubs.
 - Validate the JSON response and persist it as `rig_config.json` for traceability.
 - Hand the rig description to the external builder; builder stdout/stderr is saved in diagnostics for audit.
 - Export additional diagnostics (e.g., summary of LLM parameters) to `diagnostics.json`.
 
-## 8. Validation & Packaging
+## 9. Validation & Packaging
 - Run sanity checks (texture size limits, parameter count, missing meshes).
 - Confirm `model.moc3` exists and log the builder command that produced it.
 - Produce a summary report with pipeline timings and quality metrics (IoU, edge preservation).

@@ -5,7 +5,8 @@ CubiAI is a two-phase project that converts a single illustration into a fully r
 ## Why CubiAI?
 - **AI-assisted layer extraction** – Run SAM-HQ locally via `transformers`/`torch` (with optional hosted SAM or SLIC fallbacks) to produce semantically meaningful layers straight from a PNG.
 - **Production-aware export** – Produce layered PSDs for revision workflows and assemble a Cubism-friendly project structure with textures, physics, and parameter presets.
-- **Rigging automation** – Drive an OpenAI-compatible LLM to draft rig parameters, then delegate moc3 creation to a Live2D builder command so the asset can load directly in Cubism.
+- **Layer archive** – Save every extracted layer as a transparent PNG (`png/001.png`, `png/002.png`, …) for quick reviews or manual edits.
+- **Rigging automation (optional)** – When enabled, drive an OpenAI-compatible LLM to draft rig parameters, then delegate moc3 creation to a Live2D builder command so the asset can load directly in Cubism.
 - **Extensible architecture** – Swap AI providers, customize rig templates, and extend the pipeline for bespoke character styles.
 
 ## Project Phases
@@ -31,7 +32,7 @@ CubiAI relies on the [uv](https://github.com/astral-sh/uv) Python toolchain plus
 
 ```bash
 export OPENAI_API_KEY="sk-..."       # OpenAI-compatible token for rigging LLM calls
-export CUBISM_CLI="/Applications/CubismEditor.app/Contents/MacOS/cubism-cli"  # Example path
+export CUBISM_CLI="/Applications/CubismEditor.app/Contents/MacOS/cubism-cli"  # Optional (needed only if rigging is enabled)
 # optional overrides for SAM-HQ
 # export CUBIAI_SAM_HQ_MODEL=syscv-community/sam-hq-vit-base
 # export CUBIAI_SAM_HQ_DEVICE=cuda
@@ -50,7 +51,12 @@ uv run cubiai process ./input/character.png \
     --output-dir ./build/character
 ```
 
-> **Hard failure when misconfigured:** the rigging stage refuses to continue without both an LLM key and a `rigging.builder.command`. This prevents placeholder rigs from being emitted. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
+> **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
+
+Outputs include:
+- `layers.psd` built from the PNG stack.
+- Numbered transparent PNGs for each layer under `png/`.
+- Optional Live2D project structure (textures, `model3.json`, moc3) when rigging is enabled and a builder command is provided.
 
 ## Live2D Builder Integration
 - Edit `config/cubiai.yaml` and fill in `rigging.builder.command` with the Live2D automation tool you rely on (Cubism CLI, proprietary pipeline, etc.).

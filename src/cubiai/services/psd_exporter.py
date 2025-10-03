@@ -20,32 +20,58 @@ class PSDExporter:
         self.workspace = workspace
         self.group_name = group_name
 
-    def export(self, layers: Iterable[LayerArtifact]) -> Path:
+    def export(self, layers: Iterable[LayerArtifact], *, png_dir: Path | None = None) -> Path:
         layers = list(layers)
         if not layers:
             msg = "No layers available to export as PSD"
             raise ValueError(msg)
 
-        canvas_size = layers[0].image.size
-        psd = PSDImage.new(mode="RGBA", size=canvas_size, color=(0, 0, 0, 0))
+        if png_dir is None:
+            png_dir = self.workspace.root / "png"
 
-        for artifact in layers:
-            pil_image = artifact.image
-            if pil_image.size != canvas_size:
-                pil_image = pil_image.resize(canvas_size, Image.LANCZOS)
+        if png_dir.exists():
+            png_files = sorted(png_dir.glob("*.png"))
+        else:
+            png_files = []
 
-            x0, y0, x1, y1 = artifact.bbox
-            cropped = pil_image.crop((x0, y0, x1, y1))
-            layer = PixelLayer.frompil(
-                cropped,
-                psd,
-                artifact.name,
-                top=y0,
-                left=x0,
-                compression=Compression.RLE,
-            )
-            layer.name = artifact.name
-            psd.append(layer)
+        if png_files:
+            sample = Image.open(png_files[0]).convert("RGBA")
+            canvas_size = sample.size
+            psd = PSDImage.new(mode="RGBA", size=canvas_size, color=(0, 0, 0, 0))
+
+            for png_path in png_files:
+                image = Image.open(png_path).convert("RGBA")
+                layer = PixelLayer.frompil(
+                    image,
+                    psd,
+                    png_path.stem,
+                    top=0,
+                    left=0,
+                    compression=Compression.RLE,
+                )
+                layer.name = png_path.stem
+                psd.append(layer)
+        else:
+            canvas_size = layers[0].image.size
+            psd = PSDImage.new(mode="RGBA", size=canvas_size, color=(0, 0, 0, 0))
+
+            for artifact in layers:
+                pil_image = artifact.image
+                if pil_image.size != canvas_size:
+                    pil_image = pil_image.resize(canvas_size, Image.LANCZOS)
+
+                x0, y0, x1, y1 = artifact.bbox
+                cropped = pil_image.crop((x0, y0, x1, y1))
+                layer = PixelLayer.frompil(
+                    cropped,
+                    psd,
+                    artifact.name,
+                    top=y0,
+                    left=x0,
+                    compression=Compression.RLE,
+                )
+                layer.name = artifact.name
+                psd.append(layer)
 
         output_path = self.workspace.layers_dir / "layers.psd"
         psd.save(output_path)

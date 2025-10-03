@@ -17,9 +17,10 @@ CubiAI automates the journey from a single illustration to a Live2D-ready asset.
    - **Post-processing**: Normalizes colors, fills gaps, and enforces consistent canvas sizes across layers.
 4. **Asset Exporters**
    - **Layered PSD Exporter**: Collects individually masked layers and renders them as a layered PSD with organized groups for manual review or manual editing.
+   - **PNG Exporter**: Writes every processed layer as a transparent PNG for quick inspection or hand edits.
    - **Live2D Exporter**: Packages textures, meshes, physics, motions, and metadata into a Cubism project layout.
-5. **Rigging Engine**
-   - Sends layer metadata to an OpenAI-compatible LLM that proposes parts, parameters, deformers, and motion stubs.
+5. **Rigging Engine (Optional)**
+   - When enabled, sends layer metadata to an OpenAI-compatible LLM that proposes parts, parameters, deformers, and motion stubs.
    - Delegates moc3 creation to an external builder command (e.g., Cubism SDK automation). Builder stdout/stderr are captured for diagnostics.
    - Produces `model3.json`, pose/physics JSON, and optional `.motion3.json` animations, skipping any artefact the builder already provided.
 6. **Storage and Asset Management**

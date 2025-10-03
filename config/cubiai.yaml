@@ -13,32 +13,15 @@ export:
   psd:
     enabled: true
     group_name: CubiAI Layers
-  live2d:
+  png:
     enabled: true
+  live2d:
+    enabled: false
     texture_size: 2048
     padding: 24
     background_color: [0, 0, 0, 0]
 rigging:
-  template: humanoid-basic
-  idle_motion: true
-  blink_parameters:
-    - ParamEyeLOpen
-    - ParamEyeROpen
-  strategy: llm
-  llm_model: gpt-4.1-mini
-  llm_base_url: https://api.openai.com/v1
-  llm_api_key_env: OPENAI_API_KEY
-  builder:
-    # Install the Live2D Cubism command line exporter and expose it via $CUBISM_CLI.
-    command:
-      - "${CUBISM_CLI}"
-      - "--psd"
-      - "{PSD_PATH}"
-      - "--rig-config"
-      - "{RIG_JSON}"
-      - "--output"
-      - "{OUTPUT_DIR}"
-    timeout_seconds: 900
+  enabled: false
 models:
   assets: []
 metadata:

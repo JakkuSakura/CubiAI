@@ -25,8 +25,8 @@ CubiAI orchestrates multiple external AI services. The YAML configuration declar
 
 ## Rigging
 
-### LLM Rig Planner
-- The default configuration uses `rigging.strategy = llm` and targets OpenAI-compatible chat completions.
+-### LLM Rig Planner
+- Rigging is optional and disabled by default. To enable it, set `rigging.enabled: true` and provide LLM credentials.
 - Required environment variable: `OPENAI_API_KEY` (or whatever you set via `rigging.llm_api_key_env`).
 - `rigging.llm_model` and `rigging.llm_base_url` can point to any provider that honours the Chat Completions protocol (e.g., OpenAI, Azure, Groq, or Hugging Face text-generation-inference with the compatible middleware).
 - The LLM receives layer metadata and must respond with JSON defining `parts`, `parameters`, `deformers`, `physics`, and `motions`. Invalid JSON raises `PipelineStageError`.
@@ -53,6 +53,7 @@ CubiAI orchestrates multiple external AI services. The YAML configuration declar
         - "{OUTPUT_DIR}"
   ```
 - If the command is empty or the builder fails to emit `model.moc3`, the pipeline raises a hard error. This prevents empty moc files from slipping into exports.
+- When rigging stays disabled, the builder step is skipped.
 
 ## Additional Processing
 - `scipy`/`scikit-image` remain in the stack for matting and fallback segmentation.

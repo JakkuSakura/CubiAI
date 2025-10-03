@@ -67,26 +67,18 @@ class SamHQLocalSegmenter:
                 inputs["original_sizes"].cpu(),
                 inputs["reshaped_input_sizes"].cpu(),
             )
-            mask_stack = post_masks[0].detach().cpu().numpy()
-            if mask_stack.ndim >= 3:
-                mask_stack = mask_stack.reshape(-1, mask_stack.shape[-2], mask_stack.shape[-1])
-            elif mask_stack.ndim == 2:
-                mask_stack = mask_stack[np.newaxis, ...]
+            mask_stack = post_masks[0].detach().cpu().numpy()  # (points, masks, H, W)
+            score_rows = outputs.iou_scores[0].detach().cpu().numpy()
 
-            scores = (
-                outputs.iou_scores[0]
-                .detach()
-                .cpu()
-                .reshape(-1)
-                .tolist()
-            )
-
-            for idx, score in enumerate(scores):
-                if idx >= mask_stack.shape[0]:
-                    break
-                mask_array = mask_stack[idx]
+            for mask_row, score_row in zip(mask_stack, score_rows):
+                if not score_row.size:
+                    continue
+                best_index = int(score_row.argmax())
+                score = float(score_row[best_index])
                 if score < self.config.score_threshold:
                     continue
+
+                mask_array = mask_row[best_index]
                 if not mask_array.any():
                     continue
                 if _is_duplicate(mask_array, seen_masks):
