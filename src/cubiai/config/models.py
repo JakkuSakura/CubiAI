@@ -1,4 +1,4 @@
-"""Pydantic models representing processing profiles."""
+"""Pydantic models representing the CubiAI configuration."""
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -28,7 +28,7 @@ class HuggingFaceSegmentationConfig(BaseModel):
 
 
 class SegmentationSettings(BaseModel):
-    backend: Literal["slic", "huggingface-sam"] = Field(
+    backend: Literal["slic", "huggingface-sam", "sam-hq-local"] = Field(
         default="slic",
         description="Segmentation backend identifier.",
     )
@@ -55,6 +55,20 @@ class SegmentationSettings(BaseModel):
     huggingface: HuggingFaceSegmentationConfig | None = Field(
         default=None,
         description="Settings for the Hugging Face segmentation backend.",
+    )
+    sam_hq_local_model_id: str | None = Field(
+        default="syscv-community/sam-hq-vit-base",
+        description="Local Hugging Face model identifier for SAM-HQ segmentation.",
+    )
+    sam_hq_local_device: str | None = Field(
+        default=None,
+        description="Preferred torch device string (e.g., cuda, cpu). Defaults to auto-detection.",
+    )
+    sam_hq_local_score_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum mask score returned by SAM-HQ to keep a layer.",
     )
 
 
@@ -135,21 +149,21 @@ class ExportSettings(BaseModel):
     live2d: Live2DSettings = Field(default_factory=Live2DSettings)
 
 
-class ProfileMetadata(BaseModel):
+class ConfigMetadata(BaseModel):
     created_by: str | None = None
     notes: str | None = None
 
 
-class ProfileConfig(BaseModel):
+class AppConfig(BaseModel):
     name: str = Field(default="anime-default")
-    description: str = Field(default="Default anime character processing profile.")
+    description: str = Field(default="Default anime character processing configuration.")
     segmentation: SegmentationSettings = Field(default_factory=SegmentationSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
     rigging: RiggingSettings = Field(default_factory=RiggingSettings)
     models: ModelAssets = Field(default_factory=ModelAssets)
-    metadata: ProfileMetadata = Field(default_factory=ProfileMetadata)
+    metadata: ConfigMetadata = Field(default_factory=ConfigMetadata)
 
-    extras: dict[str, Any] = Field(default_factory=dict, description="Additional profile data.")
+    extras: dict[str, Any] = Field(default_factory=dict, description="Additional configuration data.")
 
     model_config = {
         "extra": "allow",

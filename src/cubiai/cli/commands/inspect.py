@@ -20,7 +20,9 @@ def inspect(workspace_path: Path = typer.Argument(..., help="Workspace directory
     metadata = json.loads(metadata_path.read_text())
 
     console.print(f"[bold]Workspace:[/bold] {metadata.get('workspace')}")
-    console.print(f"[bold]Profile:[/bold] {metadata.get('profile')}")
+    console.print(f"[bold]Configuration:[/bold] {metadata.get('config_path')}")
+    if metadata.get("config_name"):
+        console.print(f"[bold]Config Name:[/bold] {metadata.get('config_name')}")
     console.print(f"[bold]Duration:[/bold] {metadata.get('duration_seconds', 0):.2f}s")
 
     stages = metadata.get("stages", [])

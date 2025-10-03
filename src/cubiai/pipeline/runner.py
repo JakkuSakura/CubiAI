@@ -8,11 +8,11 @@ from typing import Iterable, List
 
 from pydantic import BaseModel, Field
 
+from ..config.models import AppConfig
 from ..errors import CubiAIError, MissingDependencyError, PipelineStageError
 from ..workspace import Workspace
 from .context import PipelineContext
 from .stages import PipelineStage, build_default_stages
-from ..config.models import ProfileConfig
 
 
 class StageResult(BaseModel):
@@ -31,14 +31,14 @@ class PipelineResult(BaseModel):
 class PipelineRunner:
     """High-level orchestrator that executes configured pipeline stages."""
 
-    def __init__(self, profile: ProfileConfig, workspace: Workspace, stages: Iterable[PipelineStage] | None = None) -> None:
-        self.profile = profile
+    def __init__(self, config: AppConfig, workspace: Workspace, stages: Iterable[PipelineStage] | None = None) -> None:
+        self.config = config
         self.workspace = workspace
         self.logger = logging.getLogger("cubiai.pipeline")
-        self.stages = list(stages or build_default_stages(profile=profile, workspace=workspace))
+        self.stages = list(stages or build_default_stages(config=config, workspace=workspace))
 
     def run(self) -> PipelineResult:
-        ctx = PipelineContext(profile=self.profile, workspace=self.workspace)
+        ctx = PipelineContext(config=self.config, workspace=self.workspace)
         stage_results: list[StageResult] = []
 
         for stage in self.stages:

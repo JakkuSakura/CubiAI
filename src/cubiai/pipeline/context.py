@@ -5,13 +5,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..config.models import ProfileConfig
+from ..config.models import AppConfig
 from ..workspace import Workspace
 
 
 @dataclass
 class PipelineContext:
-    profile: ProfileConfig
+    config: AppConfig
     workspace: Workspace
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("cubiai.pipeline"))
     data: dict[str, Any] = field(default_factory=dict)

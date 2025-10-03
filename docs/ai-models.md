@@ -1,24 +1,32 @@
 # AI Model Options
 
-CubiAI orchestrates multiple external AI services. Profiles declare which providers to use, and the pipeline aborts with a hard error if a required credential or command is missing.
+CubiAI orchestrates multiple external AI services. The YAML configuration declares which providers to use, and the pipeline aborts with a hard error if a required credential or command is missing.
 
 ## Segmentation
 
 | Backend                | Strengths                                                  | Requirements |
 |------------------------|------------------------------------------------------------|--------------|
-| `huggingface-sam`      | High fidelity masks from Segment Anything variants hosted on Hugging Face Inference. | `HF_API_TOKEN` with access to the chosen model, e.g. `facebook/sam-vit-base`. |
+| `sam-hq-local`         | Runs SAM-HQ locally with `transformers`/`torch`, better captures fine detail. | `transformers>=4.41`, `torch>=2.2`; first run downloads weights. |
+| `huggingface-sam`      | Calls a hosted Segment Anything endpoint via HTTP.          | `HF_API_TOKEN` with access to the chosen model. |
 | `slic`                 | Lightweight fallback segmentation using `scikit-image`.    | CPU only. |
 
 ### Configuring Hugging Face SAM
 - Set `HF_API_TOKEN` in your environment before running the CLI.
-- Optional profile fields: `segmentation.huggingface.endpoint`, `max_layers`, and `score_threshold`.
+- Configuration keys: `segmentation.huggingface.endpoint`, `segmentation.huggingface.max_layers`, and `segmentation.huggingface.score_threshold`.
 - API calls stream the PNG directly to the inference endpoint; the returned base64 masks are converted into PSD layers.
 - Fail-fast behaviour: missing tokens or non-2xx responses raise `PipelineStageError` so placeholder layers are never produced.
+
+### Configuring SAM-HQ Local
+- Requires `torch>=2.2` and `transformers>=4.41`. Install via `uv add torch transformers` if not already present.
+- `segmentation.sam_hq_local_model_id` defaults to `syscv-community/sam-hq-vit-base` but may be overridden to point at a local directory or another variant. You can also set `CUBIAI_SAM_HQ_MODEL` for one-off runs.
+- `segmentation.sam_hq_local_device` accepts any Torch device string (`cuda`, `cpu`, `mps`). Leave `null` to auto-detect.
+- `segmentation.sam_hq_local_score_threshold` filters low-confidence masks before they are converted into PSD layers.
+- The first run downloads the weights from Hugging Face; afterwards the cached files let you work fully offline.
 
 ## Rigging
 
 ### LLM Rig Planner
-- The default profile uses `rigging.strategy = llm` and targets OpenAI-compatible chat completions.
+- The default configuration uses `rigging.strategy = llm` and targets OpenAI-compatible chat completions.
 - Required environment variable: `OPENAI_API_KEY` (or whatever you set via `rigging.llm_api_key_env`).
 - `rigging.llm_model` and `rigging.llm_base_url` can point to any provider that honours the Chat Completions protocol (e.g., OpenAI, Azure, Groq, or Hugging Face text-generation-inference with the compatible middleware).
 - The LLM receives layer metadata and must respond with JSON defining `parts`, `parameters`, `deformers`, `physics`, and `motions`. Invalid JSON raises `PipelineStageError`.

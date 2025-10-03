@@ -161,7 +161,7 @@ def build_texture_atlas(
         if y_offset + height + padding > texture_size:
             raise PipelineStageError(
                 stage="Live2DExport",
-                message="Texture atlas overflow – increase texture_size in the profile.",
+                message="Texture atlas overflow – increase texture_size in the configuration.",
             )
 
         atlas.paste(cropped, (x_offset, y_offset), mask=cropped.split()[-1])

@@ -1,6 +1,6 @@
 # Processing Pipeline
 
-This document breaks down the CubiAI end-to-end pipeline. Each stage is modular and can be toggled or swapped via configuration profiles.
+This document breaks down the CubiAI end-to-end pipeline. Each stage is modular and can be toggled or swapped via YAML configuration files.
 
 ## 1. Intake & Workspace Setup
 - Validate file format (PNG, PSD, TIFF, WebP).
@@ -8,8 +8,10 @@ This document breaks down the CubiAI end-to-end pipeline. Each stage is modular 
 - Create a unique workspace directory that captures intermediate artifacts and logs.
 
 ## 2. Semantic Segmentation
-- When `backend = huggingface-sam`, upload the source PNG to a Hugging Face inference endpoint and download base64 masks.
-- Fallback `slic` backend remains available for offline prototypes but produces less detailed masks.
+- When `backend = sam-hq-local`, load the SAM-HQ weights locally via `transformers` and generate masks from an automatically generated point grid.
+- `huggingface-sam` can still be selected to call the hosted inference API; `slic` remains as an offline fallback without deep models.
+- Masks smaller than `segmentation.min_area_px` are discarded before PSD export to avoid noise.
+- All parameters (`sam_hq_local_*`, `num_segments`, etc.) are controlled in the YAML configuration file.
 - Output: Layered RGBA renders preserved as PNGs plus metadata (score, area, bounding box) saved per segment.
 
 ## 3. Matting & Edge Refinement

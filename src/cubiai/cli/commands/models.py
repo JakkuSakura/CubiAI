@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from ...config.loader import load_profile
+from ...config.loader import DEFAULT_CONFIG_PATH, load_config
 
 console = Console()
 models = typer.Typer(help="Model asset management utilities.")
@@ -14,19 +14,26 @@ models = typer.Typer(help="Model asset management utilities.")
 
 @models.command("sync")
 def sync(
-    profile: str = typer.Option(
-        "anime-default", "--profile", "-p", help="Profile used to determine required models."
+    config: Path = typer.Option(
+        DEFAULT_CONFIG_PATH,
+        "--config",
+        "-c",
+        help="Configuration file used to determine required model assets.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Report missing models without downloading them."
     ),
 ) -> None:
-    """Verify local model assets for a given profile."""
-    profile_cfg = load_profile(profile_name=profile)
+    """Verify local model assets declared in the configuration file."""
+    cfg = load_config(config)
 
-    required_assets = profile_cfg.models.assets
+    required_assets = cfg.models.assets
     if not required_assets:
-        console.print("[green]Profile does not declare external model assets.[/green]")
+        console.print("[green]Configuration does not declare external model assets.[/green]")
         return
 
     missing: list[str] = []

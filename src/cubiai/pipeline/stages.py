@@ -10,15 +10,11 @@ from typing import Iterable, List
 import numpy as np
 from PIL import Image
 
-from ..config.models import (
-    Live2DSettings,
-    ProfileConfig,
-    RiggingSettings,
-    SegmentationSettings,
-)
+from ..config.models import AppConfig, Live2DSettings, RiggingSettings, SegmentationSettings
 from ..errors import MissingDependencyError, PipelineStageError
 from ..pipeline.artifacts import LayerArtifact
 from ..services.hf_segmentation import HFSAMSegmenter
+from ..services.sam_hq_local import SamHQLocalSegmenter, SamHQConfig
 from ..services.llm_rigging import LLMRiggingClient, RiggingLLMError
 from ..services.live2d import Live2DExporter
 from ..services.psd_exporter import PSDExporter
@@ -61,6 +57,8 @@ class SegmentationStage(PipelineStage):
 
         if self.settings.backend == "huggingface-sam":
             layers = self._run_huggingface_stage(image)
+        elif self.settings.backend == "sam-hq-local":
+            layers = self._run_sam_hq_local(image)
         else:
             layers = self._run_slic_stage(image)
 
@@ -107,6 +105,30 @@ class SegmentationStage(PipelineStage):
         except Exception as exc:  # noqa: BLE001
             raise PipelineStageError(stage=self.name, message=str(exc)) from exc
 
+        self._persist_layers(layers)
+        return layers
+
+    def _run_sam_hq_local(self, image: Image.Image) -> List[LayerArtifact]:
+        config = SamHQConfig(
+            model_id=os.environ.get(
+                "CUBIAI_SAM_HQ_MODEL",
+                self.settings.sam_hq_local_model_id or "syscv-community/sam-hq-vit-base",
+            ),
+            device=os.environ.get("CUBIAI_SAM_HQ_DEVICE", self.settings.sam_hq_local_device),
+            max_layers=self.settings.num_segments,
+            score_threshold=self.settings.sam_hq_local_score_threshold,
+        )
+        segmenter = SamHQLocalSegmenter(config)
+        layers = [
+            layer
+            for layer in segmenter.segment(image)
+            if layer.metadata.get("area", 0) >= self.settings.min_area_px
+        ]
+        if not layers:
+            raise PipelineStageError(
+                stage=self.name,
+                message="SAM-HQ produced masks but all were below the minimum area threshold.",
+            )
         self._persist_layers(layers)
         return layers
 
@@ -300,7 +322,7 @@ class RiggingStage(PipelineStage):
             raise PipelineStageError(
                 stage=self.name,
                 message=(
-                    "Rigging builder configuration missing. Provide rigging.builder.command in the profile "
+                    "Rigging builder configuration missing. Define rigging.builder.command in the configuration "
                     "to point at a Live2D-compatible exporter."
                 ),
             )
@@ -422,20 +444,20 @@ class SummaryStage(PipelineStage):
         )
 
 
-def build_default_stages(profile: ProfileConfig, workspace: Workspace) -> list[PipelineStage]:
+def build_default_stages(config: AppConfig, workspace: Workspace) -> list[PipelineStage]:
     return [
         ImageLoaderStage(workspace=workspace),
-        SegmentationStage(settings=profile.segmentation, workspace=workspace),
+        SegmentationStage(settings=config.segmentation, workspace=workspace),
         PSDExportStage(
             workspace=workspace,
-            enabled=profile.export.psd.enabled,
-            group_name=profile.export.psd.group_name,
+            enabled=config.export.psd.enabled,
+            group_name=config.export.psd.group_name,
         ),
-        RiggingStage(settings=profile.rigging),
+        RiggingStage(settings=config.rigging),
         Live2DExportStage(
             workspace=workspace,
-            live2d=profile.export.live2d,
-            rigging=profile.rigging,
+            live2d=config.export.live2d,
+            rigging=config.rigging,
         ),
         SummaryStage(),
     ]

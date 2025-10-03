@@ -1,17 +1,14 @@
 name: anime-default
-description: Default profile targeting anime-style characters with AI-driven layering and rigging.
+description: Default configuration targeting anime-style characters with AI-driven layering and rigging.
 segmentation:
-  backend: huggingface-sam
-  num_segments: 14
+  backend: sam-hq-local
+  num_segments: 18
   compactness: 8.0
   min_area_px: 2048
   feather_radius: 2
-  huggingface:
-    model: facebook/sam-vit-base
-    endpoint: https://api-inference.huggingface.co/models/facebook/sam-vit-base
-    token_env: HF_API_TOKEN
-    max_layers: 14
-    score_threshold: 0.05
+  sam_hq_local_model_id: syscv-community/sam-hq-vit-base
+  sam_hq_local_device: null
+  sam_hq_local_score_threshold: 0.2
 export:
   psd:
     enabled: true
@@ -46,4 +43,4 @@ models:
   assets: []
 metadata:
   created_by: CubiAI
-  notes: Default profile generated during scaffolding.
+  notes: Default configuration generated during scaffolding.

@@ -5,7 +5,7 @@ The PySide GUI will build upon the CLI core to deliver an artist-friendly experi
 ## Milestones
 
 1. **Foundational GUI Shell**
-   - Project launcher with profile selection and recent workspaces.
+   - Project launcher with configuration selection and recent workspaces.
    - Embedded console view mirroring CLI logs.
    - Background worker infrastructure for long-running tasks.
 
@@ -38,7 +38,7 @@ The PySide GUI will build upon the CLI core to deliver an artist-friendly experi
 ## Integration with CLI Core
 - The GUI imports the same pipeline modules used by the CLI to avoid divergence.
 - Workspace events are emitted through a message bus (e.g., `asyncio.Queue` or `pydantic` event models).
-- Configuration edits in the GUI persist back to YAML profiles or per-project override files.
+- Configuration edits in the GUI persist back to YAML configuration files per project.
 
 ## UX Principles
 - Provide safe defaults while allowing experts to drill into underlying parameters.

@@ -4,13 +4,12 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Optional, Sequence
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from ...config.loader import InlineOverride, load_profile
+from ...config.loader import DEFAULT_CONFIG_PATH, load_config
 from ...logging_utils import configure_logging
 from ...pipeline.runner import PipelineRunner
 from ...workspace import Workspace
@@ -26,21 +25,15 @@ def process(
         "-o",
         help="Directory that will contain generated artifacts. Defaults to ./build/<stem>.",
     ),
-    profile: str = typer.Option(
-        "anime-default",
-        "--profile",
-        "-p",
-        help="Processing profile name located under the profiles/ directory.",
-    ),
-    config: Optional[Path] = typer.Option(
-        None,
+    config: Path = typer.Option(
+        DEFAULT_CONFIG_PATH,
         "--config",
-        help="Optional YAML/TOML file providing overrides that extend the profile.",
-    ),
-    set: Optional[Sequence[str]] = typer.Option(  # noqa: A002 - aligns with CLI vernacular
-        None,
-        "--set",
-        help="Inline overrides using dotted keys, e.g. segmentation.num_segments=16.",
+        "-c",
+        help="Path to the CubiAI configuration file.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
     ),
     keep_intermediate: bool = typer.Option(
         False, "--keep-intermediate", help="Retain intermediate files such as raw masks."
@@ -66,23 +59,20 @@ def process(
         resume=resume,
     )
 
-    profile_config = load_profile(
-        profile_name=profile,
-        overrides_path=config,
-        inline_overrides=[InlineOverride.parse(o) for o in (set or [])],
-    )
+    cfg = load_config(config)
 
-    runner = PipelineRunner(profile=profile_config, workspace=workspace)
+    runner = PipelineRunner(config=cfg, workspace=workspace)
 
     start = time.perf_counter()
-    console.log("Starting pipeline", profile_config.name, "→", workspace.root)
+    console.log("Starting pipeline", cfg.name, "→", workspace.root)
     result = runner.run()
     duration = time.perf_counter() - start
 
     metadata_path = workspace.root / "metadata.json"
     metadata = {
         "input": str(input_path),
-        "profile": profile_config.name,
+        "config_path": str(config),
+        "config_name": cfg.name,
         "workspace": str(workspace.root),
         "stages": [stage.model_dump() for stage in result.stage_results],
         "outputs": {key: str(value) for key, value in result.outputs.items()},
