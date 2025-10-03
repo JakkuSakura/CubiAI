@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class HuggingFaceSegmentationConfig(BaseModel):
@@ -116,39 +116,28 @@ class RiggingSettings(BaseModel):
 
 
 class AnnotationLLMSettings(BaseModel):
+    """Settings describing how the Codex CLI should be invoked for annotations."""
+
+    model_config = ConfigDict(extra="ignore")
+
     enabled: bool = Field(default=False, description="Enable LLM-assisted annotation workflow.")
-    model: str = Field(default="gpt-5", description="Chat model identifier passed to the provider.")
-    base_url: str | None = Field(
-        default="https://openrouter.ai/api/v1",
-        description="Chat completion base URL (defaults to the OpenRouter public endpoint).",
-    )
-    api_key_env: str = Field(
-        default="OPENROUTER_API_KEY",
-        description="Environment variable containing the API key used for annotation calls.",
-    )
-    temperature: float = Field(
-        default=0.2,
-        ge=0.0,
-        le=2.0,
-        description="Sampling temperature applied to the chat model.",
-    )
-    max_output_tokens: int = Field(
-        default=1024,
-        ge=64,
-        description="Upper bound on tokens generated for the label output.",
+    model: str = Field(default="gpt-4o-mini", description="Model identifier passed to the Codex CLI.")
+    codex_binary: str = Field(
+        default="codex",
+        description="Codex CLI executable used for non-interactive model calls.",
     )
     timeout_seconds: int = Field(
         default=180,
         ge=30,
-        description="Request timeout supplied to the HTTP client.",
+        description="Subprocess timeout applied to the Codex invocation.",
     )
     prompt_template: str | None = Field(
         default=None,
-        description="Optional prompt override for generating LabelMe annotations.",
+        description="Optional template override for generating LabelMe annotations.",
     )
-    default_headers: dict[str, str] = Field(
-        default_factory=dict,
-        description="Optional HTTP headers appended to every request (e.g. OpenRouter referer/title).",
+    extra_cli_args: list[str] = Field(
+        default_factory=list,
+        description="Additional flags passed directly to the Codex CLI (e.g. sandbox overrides).",
     )
 
 

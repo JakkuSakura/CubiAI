@@ -1,16 +1,17 @@
-"""LangChain-powered annotation helper that emits LabelMe-compatible JSON."""
+"""Codex CLI-driven annotation helper that emits LabelMe-compatible JSON."""
 from __future__ import annotations
 
 import base64
-import os
+import json
+import subprocess
+import tempfile
+import textwrap
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
 from PIL import Image
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from ..config import AnnotationLLMSettings
@@ -76,113 +77,77 @@ def _load_image(image_path: Path) -> tuple[Image.Image, bytes, str]:
     return image, data, fmt
 
 
-def _data_url(raw_bytes: bytes, extension: str) -> str:
-    encoded = base64.b64encode(raw_bytes).decode("ascii")
-    return f"data:image/{extension};base64,{encoded}"
+@dataclass(slots=True, frozen=True)
+class AnnotationResult:
+    """Aggregate result produced by the Codex annotation flow."""
+
+    annotation: LabelMeAnnotation
+    summary: str
 
 
 @dataclass(slots=True)
-class LangChainAnnotationTool:
-    """Wrapper around LangChain's ChatOpenAI for producing LabelMe annotations."""
+class CodexAnnotationTool:
+    """Invoke the Codex CLI to generate LabelMe annotations."""
 
     settings: AnnotationLLMSettings
     labels: Sequence[str] = field(default_factory=lambda: DEFAULT_LABELS)
-    api_key: str | None = None
     include_image_data: bool = False
-    _llm: ChatOpenAI = field(init=False, repr=False)
-    _parser: PydanticOutputParser = field(init=False, repr=False)
-    _system_prompt: str = field(init=False, repr=False)
+    _prompt_template: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.settings.enabled:
             raise AnnotationLLMError("Annotation LLM is disabled in the configuration.")
-
-        key = self.api_key or os.getenv(self.settings.api_key_env)
-        if not key:
-            raise AnnotationLLMError(
-                f"API key missing; set {self.settings.api_key_env} or pass api_key explicitly."
-            )
-
-        llm_kwargs: dict[str, object] = {
-            "model": self.settings.model,
-            "api_key": key,
-            "base_url": self.settings.base_url,
-            "temperature": self.settings.temperature,
-        }
-        if self.settings.max_output_tokens:
-            llm_kwargs["max_tokens"] = self.settings.max_output_tokens
-        if self.settings.timeout_seconds:
-            llm_kwargs["timeout"] = self.settings.timeout_seconds
-        if self.settings.default_headers:
-            llm_kwargs["default_headers"] = self.settings.default_headers
-
-        try:
-            self._llm = ChatOpenAI(**llm_kwargs)
-        except Exception as exc:  # pragma: no cover - network/client specific
-            raise AnnotationLLMError(f"Failed to initialize chat model: {exc}") from exc
-
-        self._parser = PydanticOutputParser(pydantic_object=LabelMeLLMResponse)
-
-        if self.settings.prompt_template:
-            self._system_prompt = self.settings.prompt_template
-        else:
-            format_instructions = self._parser.get_format_instructions()
-            labels_csv = ", ".join(self.labels)
-            self._system_prompt = (
-                "You are an expert annotator creating polygon labels for anime character assets. "
-                "Follow the LabelMe specification and only return JSON. "
-                f"Focus on these semantic classes: {labels_csv}.\n\n"
-                f"{format_instructions}"
-            )
+        if not self.settings.codex_binary.strip():
+            raise AnnotationLLMError("Codex CLI binary path is empty; set annotation.llm.codex_binary.")
+        self._prompt_template = self.settings.prompt_template
 
     def annotate(
         self,
         image_path: Path,
+        *,
+        output_path: Path | None = None,
         instructions: str | None = None,
         extra_labels: Iterable[str] | None = None,
-    ) -> LabelMeAnnotation:
+    ) -> AnnotationResult:
         if not image_path.exists():
             raise FileNotFoundError(f"Image not found: {image_path}")
 
-        image, byte_data, extension = _load_image(image_path)
+        image, byte_data, _ = _load_image(image_path)
         width, height = image.size
-        data_url = _data_url(byte_data, extension)
 
         labels = list(dict.fromkeys([*self.labels, *(extra_labels or [])]))
-        labels_text = ", ".join(labels)
+        target_output = output_path or image_path.with_suffix(".labelme.json")
 
-        instruction_lines = [
-            "Produce polygon annotations in LabelMe JSON format for the provided image.",
-            f"Image filename: {image_path.name}",
-            f"Image size: width={width}, height={height}",
-            f"Recognised classes: {labels_text}",
-            "Use `imageData`: null and include at least one polygon for each clearly visible class.",
-            "Exclude regions you cannot see or that are obstructed.",
-        ]
-        if instructions:
-            instruction_lines.append(f"Additional guidance: {instructions.strip()}")
-        instruction_lines.append(
-            "Return polygons with three or more points unless a class is better represented as a point or line."
+        prompt = self._build_prompt(
+            image_path=image_path,
+            output_path=target_output,
+            width=width,
+            height=height,
+            labels=labels,
+            instructions=instructions,
         )
 
-        human_message = HumanMessage(
-            content=[
-                {"type": "text", "text": "\n".join(instruction_lines)},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ]
-        )
+        raw_output = self._invoke_codex(prompt=prompt, image_path=image_path)
 
         try:
-            response = self._llm.invoke(
-                [SystemMessage(content=self._system_prompt), human_message]
-            )
-        except Exception as exc:  # pragma: no cover - network/client specific
-            raise AnnotationLLMError(f"Annotation request failed: {exc}") from exc
+            payload = json.loads(raw_output)
+        except json.JSONDecodeError as exc:  # pragma: no cover - depends on remote output quality
+            raise AnnotationLLMError(
+                f"Codex CLI returned invalid JSON: {exc.msg} (pos {exc.pos}). Raw output: {raw_output!r}"
+            ) from exc
+
+        annotation_payload = payload.get("annotation")
+        summary_payload = payload.get("summary")
+
+        if not isinstance(annotation_payload, dict):
+            raise AnnotationLLMError("Codex response missing 'annotation' object.")
+        if not isinstance(summary_payload, str) or not summary_payload.strip():
+            raise AnnotationLLMError("Codex response missing a non-empty summary string.")
 
         try:
-            parsed = self._parser.parse(response.content)
+            parsed = LabelMeLLMResponse.model_validate(annotation_payload)
         except ValidationError as exc:  # pragma: no cover - depends on remote output quality
-            raise AnnotationLLMError("Model returned malformed annotation payload") from exc
+            raise AnnotationLLMError(f"Model returned malformed annotation payload: {exc}") from exc
 
         filtered_shapes = [
             shape
@@ -199,4 +164,143 @@ class LangChainAnnotationTool:
             imageHeight=height,
             imageWidth=width,
         )
-        return annotation
+
+        return AnnotationResult(annotation=annotation, summary=summary_payload.strip())
+
+    def _build_prompt(
+        self,
+        *,
+        image_path: Path,
+        output_path: Path,
+        width: int,
+        height: int,
+        labels: Sequence[str],
+        instructions: str | None,
+    ) -> str:
+        if self._prompt_template:
+            context = {
+                "image_path": str(image_path),
+                "output_path": str(output_path),
+                "image_width": width,
+                "image_height": height,
+                "labels": ", ".join(labels),
+                "instructions": (instructions or "").strip(),
+            }
+            return self._prompt_template.format(**context)
+
+        labels_text = ", ".join(labels)
+        guidance = instructions.strip() if instructions else "None provided."
+        include_hint = (
+            "Set `imageData` to null; the application will fill it after validation."
+            if not self.include_image_data
+            else "You may set `imageData` to null; the application can embed data later."
+        )
+
+        prompt = textwrap.dedent(
+            f"""
+            You are an expert image annotator producing LabelMe-compatible JSON for anime character assets.
+
+            Basic LabelMe annotation structure:
+            - `version`: string version identifier (use 5.2.1 if unsure).
+            - `flags`: object of boolean flags (use an empty object if none).
+            - `shapes`: array of regions. Each shape includes:
+              * `label`: semantic class name.
+              * `points`: list of [x, y] coordinate pairs in pixel space.
+              * `group_id`: null or integer group identifier.
+              * `shape_type`: usually "polygon".
+              * `flags`: object of optional booleans.
+              * `description`: optional notes.
+            - `imagePath`: filename only (no directories).
+            - `imageData`: null.
+            - `imageWidth`: integer pixel width.
+            - `imageHeight`: integer pixel height.
+
+            Source image path: {image_path}
+            Output JSON path: {output_path}
+            Image dimensions: width={width}, height={height}
+            Recognised classes: {labels_text}
+            Additional guidance: {guidance}
+
+            Produce a JSON object with exactly these top-level keys:
+            {{
+              "annotation": {{ ...LabelMe annotation as described above... }},
+              "summary": "One concise English sentence describing the image"
+            }}
+
+            Requirements:
+            - Inspect the attached image to infer polygons for the recognised classes.
+            - Emit at least one polygon per clearly visible class.
+            - Every polygon must contain three or more points.
+            - Use `imagePath` = "{image_path.name}", `imageWidth` = {width}, `imageHeight` = {height}.
+            - {include_hint}
+            - The summary must be a single sentence suitable for human review.
+            - Respond with raw JSON only (no markdown fences or prose).
+            """
+        ).strip()
+
+        return prompt
+
+    def _invoke_codex(self, *, prompt: str, image_path: Path) -> str:
+        tmp_path: Path | None = None
+        try:
+            handle = tempfile.NamedTemporaryFile(mode="w", delete=False)
+            tmp_path = Path(handle.name)
+            handle.close()
+        except OSError as exc:  # pragma: no cover - OS specific
+            raise AnnotationLLMError(f"Failed to allocate temporary file for Codex output: {exc}") from exc
+
+        command = [
+            self.settings.codex_binary,
+            "exec",
+            "--model",
+            self.settings.model,
+            "--output-last-message",
+            str(tmp_path),
+            "-i",
+            str(image_path),
+        ]
+        if self.settings.extra_cli_args:
+            command.extend(self.settings.extra_cli_args)
+        command.append(prompt)
+
+        output = ""
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self.settings.timeout_seconds,
+            )
+        except FileNotFoundError as exc:
+            raise AnnotationLLMError(
+                f"Codex CLI binary not found: {self.settings.codex_binary}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise AnnotationLLMError(
+                "Codex CLI timed out before completing the annotation request."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or exc.stdout or "").strip()
+            raise AnnotationLLMError(
+                f"Codex CLI failed with exit code {exc.returncode}: {stderr or 'no stderr available'}"
+            ) from exc
+        else:
+            if tmp_path and tmp_path.exists():
+                try:
+                    output = tmp_path.read_text().strip()
+                except OSError:
+                    output = (result.stdout or "").strip()
+            else:
+                output = (result.stdout or "").strip()
+        finally:
+            if tmp_path:
+                with suppress(FileNotFoundError):
+                    tmp_path.unlink()
+
+        if not output:
+            raise AnnotationLLMError(
+                "Codex CLI returned no content. Ensure the prompt requests raw JSON output."
+            )
+
+        return output

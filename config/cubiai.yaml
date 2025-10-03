@@ -25,14 +25,11 @@ rigging:
 annotation:
   llm:
     enabled: false
-    model: gpt-5
-    base_url: https://openrouter.ai/api/v1
-    api_key_env: OPENROUTER_API_KEY
-    temperature: 0.2
-    max_output_tokens: 1024
+    model: gpt-4o-mini
+    codex_binary: codex
     timeout_seconds: 180
     prompt_template: null
-    default_headers: {}
+    extra_cli_args: []
 models:
   assets: []
 metadata:
