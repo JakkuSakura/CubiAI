@@ -59,7 +59,7 @@ uv run cubiai annotate ./input/character.png \
     --output ./build/character/character.labelme.json
 ```
 
-The command pulls model credentials from the `annotation.llm` section in `config/cubiai.yaml`. Override the model or base URL at runtime using `--model` and `--base-url`, or pass `--embed-image` to inline the image as base64 within the exported JSON.
+The command pulls model credentials from the `annotation.llm` section in `config/cubiai.yaml`. By default it targets OpenRouter (`https://openrouter.ai/api/v1`) and expects `OPENROUTER_API_KEY`; change `annotation.llm.api_key_env` if you prefer a different provider. Override the model or base URL at runtime using `--model` and `--base-url`, set custom headers such as `HTTP-Referer` via `annotation.llm.default_headers`, or pass `--embed-image` to inline the image as base64 within the exported JSON.
 
 > **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
 

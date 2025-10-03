@@ -26,12 +26,13 @@ annotation:
   llm:
     enabled: false
     model: gpt-5
-    base_url: null
-    api_key_env: OPENAI_API_KEY
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
     temperature: 0.2
     max_output_tokens: 1024
     timeout_seconds: 180
     prompt_template: null
+    default_headers: {}
 models:
   assets: []
 metadata:

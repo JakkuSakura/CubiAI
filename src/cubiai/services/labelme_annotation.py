@@ -113,6 +113,8 @@ class LangChainAnnotationTool:
             llm_kwargs["max_tokens"] = self.settings.max_output_tokens
         if self.settings.timeout_seconds:
             llm_kwargs["timeout"] = self.settings.timeout_seconds
+        if self.settings.default_headers:
+            llm_kwargs["default_headers"] = self.settings.default_headers
 
         try:
             self._llm = ChatOpenAI(**llm_kwargs)

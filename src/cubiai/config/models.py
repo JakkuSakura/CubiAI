@@ -119,8 +119,8 @@ class AnnotationLLMSettings(BaseModel):
     enabled: bool = Field(default=False, description="Enable LLM-assisted annotation workflow.")
     model: str = Field(default="gpt-5", description="Chat model identifier passed to the provider.")
     base_url: str | None = Field(
-        default=None,
-        description="Optional override for the chat completion base URL (for OpenAI-compatible providers).",
+        default="https://openrouter.ai/api/v1",
+        description="Chat completion base URL (defaults to the OpenRouter public endpoint).",
     )
     api_key_env: str = Field(
         default="OPENROUTER_API_KEY",
@@ -145,6 +145,10 @@ class AnnotationLLMSettings(BaseModel):
     prompt_template: str | None = Field(
         default=None,
         description="Optional prompt override for generating LabelMe annotations.",
+    )
+    default_headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional HTTP headers appended to every request (e.g. OpenRouter referer/title).",
     )
 
 
