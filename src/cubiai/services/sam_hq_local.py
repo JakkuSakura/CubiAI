@@ -68,8 +68,10 @@ class SamHQLocalSegmenter:
                 inputs["reshaped_input_sizes"].cpu(),
             )
             mask_stack = post_masks[0].detach().cpu().numpy()
-            if mask_stack.ndim == 4:
-                mask_stack = mask_stack[:, 0, ...]
+            if mask_stack.ndim >= 3:
+                mask_stack = mask_stack.reshape(-1, mask_stack.shape[-2], mask_stack.shape[-1])
+            elif mask_stack.ndim == 2:
+                mask_stack = mask_stack[np.newaxis, ...]
 
             scores = (
                 outputs.iou_scores[0]
