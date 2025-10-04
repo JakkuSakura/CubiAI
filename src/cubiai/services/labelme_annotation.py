@@ -102,12 +102,12 @@ class CodexAnnotationTool:
         self._prompt_template = self.settings.prompt_template
 
     def annotate(
-        self,
-        image_path: Path,
-        *,
-        output_path: Path | None = None,
-        instructions: str | None = None,
-        extra_labels: Iterable[str] | None = None,
+            self,
+            image_path: Path,
+            *,
+            output_path: Path | None = None,
+            instructions: str | None = None,
+            extra_labels: Iterable[str] | None = None,
     ) -> AnnotationResult:
         if not image_path.exists():
             raise FileNotFoundError(f"Image not found: {image_path}")
@@ -117,7 +117,7 @@ class CodexAnnotationTool:
 
         labels = list(dict.fromkeys([*self.labels, *(extra_labels or [])]))
         target_output = output_path or image_path.with_suffix(".labelme.json")
-
+        response_json_path = image_path.with_suffix('.json')
         prompt = self._build_prompt(
             image_path=image_path,
             output_path=target_output,
@@ -125,15 +125,16 @@ class CodexAnnotationTool:
             height=height,
             labels=labels,
             instructions=instructions,
+            response_json_path=response_json_path
         )
 
-        raw_output = self._invoke_codex(prompt=prompt, image_path=image_path)
+        # self._invoke_codex(prompt=prompt)
 
         try:
-            payload = json.loads(raw_output)
+            payload = json.load(open(response_json_path))
         except json.JSONDecodeError as exc:  # pragma: no cover - depends on remote output quality
             raise AnnotationLLMError(
-                f"Codex CLI returned invalid JSON: {exc.msg} (pos {exc.pos}). Raw output: {raw_output!r}"
+                f"Codex CLI returned invalid JSON: {exc.msg} (pos {exc.pos})"
             ) from exc
 
         annotation_payload = payload.get("annotation")
@@ -168,26 +169,16 @@ class CodexAnnotationTool:
         return AnnotationResult(annotation=annotation, summary=summary_payload.strip())
 
     def _build_prompt(
-        self,
-        *,
-        image_path: Path,
-        output_path: Path,
-        width: int,
-        height: int,
-        labels: Sequence[str],
-        instructions: str | None,
+            self,
+            *,
+            image_path: Path,
+            output_path: Path,
+            width: int,
+            height: int,
+            labels: Sequence[str],
+            instructions: str | None,
+            response_json_path: Path
     ) -> str:
-        if self._prompt_template:
-            context = {
-                "image_path": str(image_path),
-                "output_path": str(output_path),
-                "image_width": width,
-                "image_height": height,
-                "labels": ", ".join(labels),
-                "instructions": (instructions or "").strip(),
-            }
-            return self._prompt_template.format(**context)
-
         labels_text = ", ".join(labels)
         guidance = instructions.strip() if instructions else "None provided."
         include_hint = (
@@ -223,7 +214,6 @@ class CodexAnnotationTool:
 
             Produce a JSON object with exactly these top-level keys:
             {{
-              "annotation": {{ ...LabelMe annotation as described above... }},
               "summary": "One concise English sentence describing the image"
             }}
 
@@ -234,41 +224,24 @@ class CodexAnnotationTool:
             - Use `imagePath` = "{image_path.name}", `imageWidth` = {width}, `imageHeight` = {height}.
             - {include_hint}
             - The summary must be a single sentence suitable for human review.
-            - Respond with raw JSON only (no markdown fences or prose).
+            - Write your response of JSON at {response_json_path} only; do not include any other text.
             """
         ).strip()
 
         return prompt
 
-    def _invoke_codex(self, *, prompt: str, image_path: Path) -> str:
-        tmp_path: Path | None = None
-        try:
-            handle = tempfile.NamedTemporaryFile(mode="w", delete=False)
-            tmp_path = Path(handle.name)
-            handle.close()
-        except OSError as exc:  # pragma: no cover - OS specific
-            raise AnnotationLLMError(f"Failed to allocate temporary file for Codex output: {exc}") from exc
-
+    def _invoke_codex(self, *, prompt: str):
         command = [
             self.settings.codex_binary,
             "exec",
-            "--model",
-            self.settings.model,
-            "--output-last-message",
-            str(tmp_path),
-            "-i",
-            str(image_path),
+            "--full-auto",
+            prompt,
         ]
-        if self.settings.extra_cli_args:
-            command.extend(self.settings.extra_cli_args)
-        command.append(prompt)
 
-        output = ""
         try:
             result = subprocess.run(
                 command,
                 check=True,
-                capture_output=True,
                 text=True,
                 timeout=self.settings.timeout_seconds,
             )
@@ -285,22 +258,4 @@ class CodexAnnotationTool:
             raise AnnotationLLMError(
                 f"Codex CLI failed with exit code {exc.returncode}: {stderr or 'no stderr available'}"
             ) from exc
-        else:
-            if tmp_path and tmp_path.exists():
-                try:
-                    output = tmp_path.read_text().strip()
-                except OSError:
-                    output = (result.stdout or "").strip()
-            else:
-                output = (result.stdout or "").strip()
-        finally:
-            if tmp_path:
-                with suppress(FileNotFoundError):
-                    tmp_path.unlink()
 
-        if not output:
-            raise AnnotationLLMError(
-                "Codex CLI returned no content. Ensure the prompt requests raw JSON output."
-            )
-
-        return output
