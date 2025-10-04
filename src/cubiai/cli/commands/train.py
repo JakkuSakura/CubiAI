@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import os
 from pathlib import Path
@@ -23,6 +24,44 @@ from ...services.cluster_annotation import FEATURE_VERSION, compute_feature_matr
 console = Console()
 os.environ.setdefault("SKIMAGE_NUM_THREADS", "1")
 app = typer.Typer(help="Prepare and refine the semi-supervised cluster annotator")
+
+
+def _process_image(image_path: Path, *, superpixels: int, compactness: float) -> tuple[np.ndarray | None, list[dict[str, object]]]:
+    try:
+        with Image.open(image_path) as src:
+            image = src.convert("RGB")
+    except Exception as exc:
+        return None, [{"warning": f"failed to read: {exc}"}]
+
+    rgb = np.array(image)
+    rgb_float = np.ascontiguousarray(rgb, dtype=np.float64) / 255.0
+    try:
+        segments = segmentation.slic(
+            rgb_float,
+            n_segments=superpixels,
+            compactness=compactness,
+            start_label=0,
+            channel_axis=-1,
+        )
+    except Exception as exc:
+        return None, [{"warning": f"slic_failed: {exc}"}]
+
+    try:
+        features, records = compute_feature_matrix(rgb, segments)
+    except Exception as exc:
+        return None, [{"warning": f"feature_failed: {exc}"}]
+
+    metadata = [
+        {
+            "image": image_path.name,
+            "image_path": str(image_path),
+            "segment_id": record.segment_id,
+            "centroid": [round(record.centroid[0], 6), round(record.centroid[1], 6)],
+            "area": record.area,
+        }
+        for record in records
+    ]
+    return features, metadata
 
 
 IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
@@ -71,6 +110,7 @@ def prepare(
     compactness: float = typer.Option(8.0, "--compactness", min=0.1, help="SLIC compactness parameter."),
     batch_size: int = typer.Option(2048, "--batch-size", min=32, help="MiniBatchKMeans batch size."),
     random_state: int = typer.Option(42, "--random-state", help="Random seed for reproducibility."),
+    workers: int | None = typer.Option(None, "--workers", min=1, help="Number of worker threads (default: CPU count)."),
 ) -> None:
     """Run clustering over images and persist artifacts for later labelling."""
 
@@ -90,36 +130,48 @@ def prepare(
     metadata: list[dict[str, object]] = []
     processed_images = 0
 
-    for image_path in tqdm(image_paths, desc="Images", unit="img"):
-        with Image.open(image_path) as src:
-            image = src.convert("RGB")
-        rgb = np.array(image)
-        rgb_float = np.ascontiguousarray(rgb, dtype=np.float64) / 255.0
-        try:
-            segments = segmentation.slic(
-                rgb_float,
-                n_segments=superpixels,
-                compactness=compactness,
-                start_label=0,
-                channel_axis=-1,
-            )
-        except Exception as exc:  # pragma: no cover - depends on image corruptions
-            console.print(f"[yellow]Skipping {image_path} (SLIC failed: {exc}).[/yellow]")
-            continue
+    max_workers = workers or os.cpu_count() or 1
 
-        features, records = compute_feature_matrix(rgb, segments)
-        feature_rows.extend(features)
-        for record in records:
-            metadata.append(
-                {
-                    "image": image_path.name,
-                    "image_path": str(image_path),
-                    "segment_id": record.segment_id,
-                    "centroid": [round(record.centroid[0], 6), round(record.centroid[1], 6)],
-                    "area": record.area,
-                }
+    if max_workers <= 1:
+        iterator = tqdm(image_paths, desc="Images", unit="img")
+        for image_path in iterator:
+            features, meta = _process_image(
+                image_path,
+                superpixels=superpixels,
+                compactness=compactness,
             )
-        processed_images += 1
+            if features is None:
+                warning = meta[0].get("warning") if meta else "unknown error"
+                console.print(f"[yellow]Skipping {image_path}: {warning}[/yellow]")
+                continue
+            feature_rows.extend(features)
+            metadata.extend(meta)
+            processed_images += 1
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_image,
+                    path,
+                    superpixels=superpixels,
+                    compactness=compactness,
+                ): path
+                for path in image_paths
+            }
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Images", unit="img"):
+                image_path = futures[future]
+                try:
+                    features, meta = future.result()
+                except Exception as exc:  # pragma: no cover - thread runtime exceptions
+                    console.print(f"[yellow]Skipping {image_path}: {exc}")
+                    continue
+                if features is None:
+                    warning = meta[0].get("warning") if meta else "unknown error"
+                    console.print(f"[yellow]Skipping {image_path}: {warning}[/yellow]")
+                    continue
+                feature_rows.extend(features)
+                metadata.extend(meta)
+                processed_images += 1
 
     if not feature_rows:
         raise typer.BadParameter("Failed to compute any segment features.")
