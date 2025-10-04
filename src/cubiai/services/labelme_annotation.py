@@ -128,7 +128,7 @@ class CodexAnnotationTool:
             response_json_path=response_json_path
         )
 
-        # self._invoke_codex(prompt=prompt)
+        self._invoke_codex(prompt=prompt)
 
         try:
             payload = json.load(open(response_json_path))
@@ -137,16 +137,13 @@ class CodexAnnotationTool:
                 f"Codex CLI returned invalid JSON: {exc.msg} (pos {exc.pos})"
             ) from exc
 
-        annotation_payload = payload.get("annotation")
         summary_payload = payload.get("summary")
 
-        if not isinstance(annotation_payload, dict):
-            raise AnnotationLLMError("Codex response missing 'annotation' object.")
         if not isinstance(summary_payload, str) or not summary_payload.strip():
             raise AnnotationLLMError("Codex response missing a non-empty summary string.")
 
         try:
-            parsed = LabelMeLLMResponse.model_validate(annotation_payload)
+            parsed = LabelMeLLMResponse.model_validate(target_output)
         except ValidationError as exc:  # pragma: no cover - depends on remote output quality
             raise AnnotationLLMError(f"Model returned malformed annotation payload: {exc}") from exc
 
@@ -189,42 +186,27 @@ class CodexAnnotationTool:
 
         prompt = textwrap.dedent(
             f"""
-            You are an expert image annotator producing LabelMe-compatible JSON for anime character assets.
+            You are an expert anime image annotator. Produce LabelMe-compatible polygons for the supplied image.
 
-            Basic LabelMe annotation structure:
-            - `version`: string version identifier (use 5.2.1 if unsure).
-            - `flags`: object of boolean flags (use an empty object if none).
-            - `shapes`: array of regions. Each shape includes:
-              * `label`: semantic class name.
-              * `points`: list of [x, y] coordinate pairs in pixel space.
-              * `group_id`: null or integer group identifier.
-              * `shape_type`: usually "polygon".
-              * `flags`: object of optional booleans.
-              * `description`: optional notes.
-            - `imagePath`: filename only (no directories).
-            - `imageData`: null.
-            - `imageWidth`: integer pixel width.
-            - `imageHeight`: integer pixel height.
+            Image metadata:
+            - Path: {image_path}
+            - Dimensions: width {width}px, height {height}px
 
-            Source image path: {image_path}
-            Output JSON path: {output_path}
-            Image dimensions: width={width}, height={height}
-            Recognised classes: {labels_text}
-            Additional guidance: {guidance}
+            Classes to cover: {labels_text}
+            Extra guidance: {guidance}
 
-            Produce a JSON object with exactly these top-level keys:
-            {{
-              "summary": "One concise English sentence describing the image"
-            }}
+            Output JSON files (write the JSON payload only, no commentary):
+            1. {output_path}
+               - Keys: version, flags, shapes, imagePath, imageData, imageWidth, imageHeight
+               - Use version "5.2.1" if not specified; default flags to {{}}
+               - Each shape must include label, points (>=3 [x, y]), group_id (null or integer), shape_type "polygon", flags {{}}
+               - Add description only when it clarifies the region (e.g. "left eye")
+               - Use imagePath "{image_path.name}", imageWidth {width}, imageHeight {height}. {include_hint}
+               - Annotate every clearly visible class listed above with at least one polygon; multiple polygons are allowed
+            2. {response_json_path}
+               - Single top-level key "summary" with one concise English sentence describing the image
 
-            Requirements:
-            - Inspect the attached image to infer polygons for the recognised classes.
-            - Emit at least one polygon per clearly visible class.
-            - Every polygon must contain three or more points.
-            - Use `imagePath` = "{image_path.name}", `imageWidth` = {width}, `imageHeight` = {height}.
-            - {include_hint}
-            - The summary must be a single sentence suitable for human review.
-            - Write your response of JSON at {response_json_path} only; do not include any other text.
+            Follow the instructions exactly and do not emit any other files or text.
             """
         ).strip()
 
@@ -258,4 +240,3 @@ class CodexAnnotationTool:
             raise AnnotationLLMError(
                 f"Codex CLI failed with exit code {exc.returncode}: {stderr or 'no stderr available'}"
             ) from exc
-

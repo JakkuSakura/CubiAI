@@ -65,7 +65,7 @@ def preview(
     if not annotation_file.exists():
         raise typer.BadParameter(f"Annotation file not found: {annotation_file}")
 
-    target_path = output_path or image_path.with_name(f"{image_path.stem}_preview.png")
+    target_path = output_path or image_path.with_name(f"{image_path.stem}.preview.png")
 
     base_style = PreviewStyle()
     style = PreviewStyle(
