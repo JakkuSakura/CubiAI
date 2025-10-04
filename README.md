@@ -26,6 +26,15 @@ LICENSE             License information
 docs/               Extended documentation (architecture, models, usage, roadmap)
 ```
 Additional directories for source code, tests, and assets will be introduced as implementation progresses.
+## Data
+This project expects a raw portrait dataset under `data/raw/danbooru2019/`.
+
+Danbooru2023 is huge (~8 TB). For experimentation you can fetch a single shard,
+for example `original/data-0000.tar`.
+https://huggingface.co/datasets/nyanko7/danbooru2023/resolve/main/original/data-0000.tar
+```shell
+tar xf data-0000.tar -C data/raw/danbooru2019/
+```
 
 ## Getting Started
 CubiAI relies on the [uv](https://github.com/astral-sh/uv) Python toolchain plus external AI services. Configure credentials first:

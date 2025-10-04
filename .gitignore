@@ -207,5 +207,4 @@ marimo/_lsp/
 __marimo__/
 
 
-data/raw
-data/annotations
+data/
