@@ -51,15 +51,28 @@ uv run cubiai process ./input/character.png \
     --output-dir ./build/character
 ```
 
-Generate LLM-assisted LabelMe annotations:
+Train the semi-supervised cluster annotator (skips files containing `.preview`):
 
 ```bash
-uv run cubiai annotate ./input/character.png \
-    --label hair --label face --label clothes \
-    --output ./build/character/character.labelme.json
+PYTHONPATH=src python train.py prepare data/raw/danbooru2023 ./models/cluster_workdir \
+    --clusters 64 --superpixels 320
 ```
 
-The command pulls model credentials from the `annotation.llm` section in `config/cubiai.yaml`. By default it targets OpenRouter (`https://openrouter.ai/api/v1`) and expects `OPENROUTER_API_KEY`; change `annotation.llm.api_key_env` if you prefer a different provider. Override the model or base URL at runtime using `--model` and `--base-url`, set custom headers such as `HTTP-Referer` via `annotation.llm.default_headers`, and adjust completion limits with `--max-output-tokens`, `--retry-attempts`, and `--retry-scale`. Pass `--embed-image` to inline the image as base64 within the exported JSON.
+After reviewing `cluster_summary.json`, attach group labels and refine the classifier:
+
+```bash
+PYTHONPATH=src python train.py label ./models/cluster_workdir ./annotations/group_labels.json
+```
+
+Generate LabelMe annotations (cluster backend runs by default):
+
+```bash
+uv run cubiai annotate ./input/character.png --output ./build/character/character.labelme.json
+```
+
+Need a language model instead? Pass `--strategy codex` (and optionally labels/instructions) to fall back to the Codex-driven pipeline.
+
+Cluster defaults live under `annotation.cluster` (model path, SLIC parameters, probability threshold). The Codex backend still relies on `annotation.llm` for credentials, model selection, and CLI overrides such as `--model`, `--codex-binary`, and `--extra-cli-arg`.
 
 > **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
 
@@ -77,7 +90,7 @@ Consult `docs/cli-usage.md` for end-to-end CLI examples and additional troublesh
 
 ## Configuration
 - All runtime settings reside in `config/cubiai.yaml`. Duplicate this file for project-specific presets and point the CLI at your variant with `--config`.
-- Key sections include `segmentation` (SAM-HQ parameters), `rigging` (LLM model and builder command), and `export` (PSD/Live2D options).
+- Key sections include `segmentation` (SAM-HQ parameters), `annotation.strategy` + `annotation.cluster` (semi-supervised model paths and thresholds), `annotation.llm` (Codex fallback settings), `rigging` (builder command), and `export` (PSD/Live2D options).
 
 ## Documentation
 The `docs/` directory captures the design decisions behind CubiAI:

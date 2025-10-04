@@ -23,6 +23,18 @@ export:
 rigging:
   enabled: false
 annotation:
+  strategy: cluster
+  cluster:
+    enabled: true
+    model_path: models/cluster_labeler.joblib
+    n_clusters: 64
+    superpixels: 300
+    compactness: 8.0
+    min_probability: 0.55
+    unknown_label: unknown
+    max_points_per_polygon: 120
+    contour_tolerance: 2.5
+    dilation_radius: 1
   llm:
     enabled: false
     model: gpt-4o-mini

@@ -141,7 +141,62 @@ class AnnotationLLMSettings(BaseModel):
     )
 
 
+class ClusterAnnotationSettings(BaseModel):
+    """Settings for the semi-supervised cluster-based annotator."""
+
+    enabled: bool = Field(default=True, description="Enable the semi-supervised cluster annotator.")
+    model_path: str = Field(
+        default="models/cluster_labeler.joblib",
+        description="Path to the trained cluster annotator model produced by train.py.",
+    )
+    n_clusters: int = Field(
+        default=64,
+        ge=2,
+        description="Number of clusters expected by the trained model (for validation only).",
+    )
+    superpixels: int = Field(
+        default=300,
+        ge=32,
+        description="Number of SLIC superpixels generated per image during inference.",
+    )
+    compactness: float = Field(
+        default=8.0,
+        ge=0.1,
+        description="Compactness parameter used for SLIC segmentation.",
+    )
+    min_probability: float = Field(
+        default=0.55,
+        ge=0.0,
+        le=1.0,
+        description="Minimum classifier confidence required to emit a polygon.",
+    )
+    unknown_label: str = Field(
+        default="unknown",
+        description="Fallback label assigned when confidence is insufficient.",
+    )
+    max_points_per_polygon: int = Field(
+        default=120,
+        ge=16,
+        description="Maximum vertices retained after contour simplification.",
+    )
+    contour_tolerance: float = Field(
+        default=2.5,
+        ge=0.1,
+        description="Tolerance for skimage.measure.approximate_polygon when simplifying contours.",
+    )
+    dilation_radius: int = Field(
+        default=1,
+        ge=0,
+        description="Optional morphological dilation (in pixels) before contour extraction.",
+    )
+
+
 class AnnotationSettings(BaseModel):
+    strategy: Literal["cluster", "codex"] = Field(
+        default="cluster",
+        description="Default annotation backend strategy.",
+    )
+    cluster: ClusterAnnotationSettings = Field(default_factory=ClusterAnnotationSettings)
     llm: AnnotationLLMSettings = Field(default_factory=AnnotationLLMSettings)
 
 
