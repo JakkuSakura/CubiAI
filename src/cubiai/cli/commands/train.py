@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -12,6 +13,7 @@ import typer
 from PIL import Image
 from rich.console import Console
 from skimage import segmentation
+from tqdm import tqdm
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -19,6 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from ...services.cluster_annotation import FEATURE_VERSION, compute_feature_matrix
 
 console = Console()
+os.environ.setdefault("SKIMAGE_NUM_THREADS", "1")
 app = typer.Typer(help="Prepare and refine the semi-supervised cluster annotator")
 
 
@@ -85,17 +88,25 @@ def prepare(
 
     feature_rows: list[np.ndarray] = []
     metadata: list[dict[str, object]] = []
+    processed_images = 0
 
-    for image_path in image_paths:
+    for image_path in tqdm(image_paths, desc="Images", unit="img"):
         with Image.open(image_path) as src:
             image = src.convert("RGB")
         rgb = np.array(image)
-        segments = segmentation.slic(
-            rgb,
-            n_segments=superpixels,
-            compactness=compactness,
-            start_label=0,
-        )
+        rgb_float = np.ascontiguousarray(rgb, dtype=np.float64) / 255.0
+        try:
+            segments = segmentation.slic(
+                rgb_float,
+                n_segments=superpixels,
+                compactness=compactness,
+                start_label=0,
+                channel_axis=-1,
+            )
+        except Exception as exc:  # pragma: no cover - depends on image corruptions
+            console.print(f"[yellow]Skipping {image_path} (SLIC failed: {exc}).[/yellow]")
+            continue
+
         features, records = compute_feature_matrix(rgb, segments)
         feature_rows.extend(features)
         for record in records:
@@ -108,9 +119,12 @@ def prepare(
                     "area": record.area,
                 }
             )
+        processed_images += 1
 
     if not feature_rows:
         raise typer.BadParameter("Failed to compute any segment features.")
+    if processed_images == 0:
+        raise typer.BadParameter("No images produced usable SLIC segments. Check the dataset or parameters.")
 
     features_matrix = np.stack(feature_rows, axis=0)
 
@@ -161,7 +175,7 @@ def prepare(
 
     summary = {
         "prepared_at": datetime.utcnow().isoformat(timespec="seconds"),
-        "images": len(image_paths),
+        "images": processed_images,
         "segments": len(metadata),
         "clusters": n_clusters,
         "superpixels": superpixels,

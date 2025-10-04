@@ -149,6 +149,7 @@ dependencies = [
     { name = "scipy" },
     { name = "skia-python" },
     { name = "torch" },
+    { name = "tqdm" },
     { name = "transformers" },
     { name = "typer" },
 ]
@@ -182,6 +183,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.11.0" },
     { name = "skia-python", specifier = ">=87.5" },
     { name = "torch", specifier = ">=2.2.0" },
+    { name = "tqdm", specifier = ">=4.66.0" },
     { name = "transformers", specifier = ">=4.41.0" },
     { name = "typer", specifier = ">=0.12.3" },
 ]
