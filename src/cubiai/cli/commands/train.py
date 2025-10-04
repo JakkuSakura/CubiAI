@@ -2,86 +2,22 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-import os
+
 from pathlib import Path
-from typing import Iterable
+from typing import Optional
 
 import joblib
 import numpy as np
 import typer
-from PIL import Image
 from rich.console import Console
-from skimage import segmentation
-from tqdm import tqdm
-from sklearn.cluster import MiniBatchKMeans
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
-from ...services.cluster_annotation import FEATURE_VERSION, compute_feature_matrix
+from ...services.cluster_prepare import PrepareOptions, run_prepare
+from ...viewers import cluster_review
 
 console = Console()
-os.environ.setdefault("SKIMAGE_NUM_THREADS", "1")
-app = typer.Typer(help="Prepare and refine the semi-supervised cluster annotator")
-
-
-def _process_image(image_path: Path, *, superpixels: int, compactness: float) -> tuple[np.ndarray | None, list[dict[str, object]]]:
-    try:
-        with Image.open(image_path) as src:
-            image = src.convert("RGB")
-    except Exception as exc:
-        return None, [{"warning": f"failed to read: {exc}"}]
-
-    rgb = np.array(image)
-    rgb_float = np.ascontiguousarray(rgb, dtype=np.float64) / 255.0
-    try:
-        segments = segmentation.slic(
-            rgb_float,
-            n_segments=superpixels,
-            compactness=compactness,
-            start_label=0,
-            channel_axis=-1,
-        )
-    except Exception as exc:
-        return None, [{"warning": f"slic_failed: {exc}"}]
-
-    try:
-        features, records = compute_feature_matrix(rgb, segments)
-    except Exception as exc:
-        return None, [{"warning": f"feature_failed: {exc}"}]
-
-    metadata = [
-        {
-            "image": image_path.name,
-            "image_path": str(image_path),
-            "segment_id": record.segment_id,
-            "centroid": [round(record.centroid[0], 6), round(record.centroid[1], 6)],
-            "area": record.area,
-        }
-        for record in records
-    ]
-    return features, metadata
-
-
-IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
-FEATURES_FILE = "features.npy"
-CLUSTER_IDS_FILE = "cluster_ids.npy"
-METADATA_FILE = "metadata.json"
-SUMMARY_FILE = "cluster_summary.json"
-ASSIGNMENTS_FILE = "cluster_assignments.json"
-MODEL_FILE = "cluster_labeler.joblib"
-
-
-def _iter_images(directory: Path) -> Iterable[Path]:
-    for path in sorted(directory.rglob("*")):
-        if path.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        if ".preview" in path.name:
-            continue
-        yield path
+app = typer.Typer(help="Prepare, review, and label cluster annotations")
 
 
 def _load_group_labels(path: Path) -> dict[int, str]:
@@ -96,7 +32,7 @@ def _load_group_labels(path: Path) -> dict[int, str]:
             if not isinstance(item, dict):
                 continue
             if "cluster" in item and "label" in item:
-                mapping[int(item["cluster"])] = str(item["label"])
+                mapping[int(item["cluster"])] = str(item["label"] )
         return mapping
     raise typer.BadParameter(
         "Group labels must be a mapping or a list of {\"cluster\": int, \"label\": str}."
@@ -106,163 +42,34 @@ def _load_group_labels(path: Path) -> dict[int, str]:
 @app.command()
 def prepare(
     images_dir: Path = typer.Argument(..., help="Directory containing training images (excluding *.preview.* files)."),
-    workdir: Path = typer.Argument(..., help="Directory where intermediate artifacts and the model are written."),
+    workdir: Path = typer.Argument(..., help="Directory where clustering artifacts are written."),
     n_clusters: int = typer.Option(64, "--clusters", min=2, help="Number of k-means clusters."),
     superpixels: int = typer.Option(300, "--superpixels", min=32, help="SLIC superpixels per image."),
     compactness: float = typer.Option(8.0, "--compactness", min=0.1, help="SLIC compactness parameter."),
     batch_size: int = typer.Option(2048, "--batch-size", min=32, help="MiniBatchKMeans batch size."),
     random_state: int = typer.Option(42, "--random-state", help="Random seed for reproducibility."),
-    workers: int | None = typer.Option(None, "--workers", min=1, help="Number of worker threads (default: CPU count)."),
+    workers: Optional[int] = typer.Option(None, "--workers", min=1, help="Number of worker threads (default: CPU count)."),
 ) -> None:
     """Run clustering over images and persist artifacts for later labelling."""
 
-    if not images_dir.exists() or not images_dir.is_dir():
-        raise typer.BadParameter(f"Image directory not found: {images_dir}")
-
-    image_paths = list(_iter_images(images_dir))
-    if not image_paths:
-        raise typer.BadParameter("No eligible images found (accepted: png, jpg, webp, bmp).")
-
-    workdir.mkdir(parents=True, exist_ok=True)
-    model_target = workdir / MODEL_FILE
-
-    console.print(f"[bold]Extracting features from {len(image_paths)} image(s)...[/bold]")
-
-    feature_rows: list[np.ndarray] = []
-    metadata: list[dict[str, object]] = []
-    processed_images = 0
-
-    max_workers = workers or os.cpu_count() or 1
-
-    if max_workers <= 1:
-        iterator = tqdm(image_paths, desc="Images", unit="img")
-        for image_path in iterator:
-            features, meta = _process_image(
-                image_path,
-                superpixels=superpixels,
-                compactness=compactness,
-            )
-            if features is None:
-                warning = meta[0].get("warning") if meta else "unknown error"
-                console.print(f"[yellow]Skipping {image_path}: {warning}[/yellow]")
-                continue
-            feature_rows.extend(features)
-            metadata.extend(meta)
-            processed_images += 1
-    else:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    _process_image,
-                    path,
-                    superpixels=superpixels,
-                    compactness=compactness,
-                ): path
-                for path in image_paths
-            }
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Images", unit="img"):
-                image_path = futures[future]
-                try:
-                    features, meta = future.result()
-                except Exception as exc:  # pragma: no cover - thread runtime exceptions
-                    console.print(f"[yellow]Skipping {image_path}: {exc}")
-                    continue
-                if features is None:
-                    warning = meta[0].get("warning") if meta else "unknown error"
-                    console.print(f"[yellow]Skipping {image_path}: {warning}[/yellow]")
-                    continue
-                feature_rows.extend(features)
-                metadata.extend(meta)
-                processed_images += 1
-
-    if not feature_rows:
-        raise typer.BadParameter("Failed to compute any segment features.")
-    if processed_images == 0:
-        raise typer.BadParameter("No images produced usable SLIC segments. Check the dataset or parameters.")
-
-    features_matrix = np.stack(feature_rows, axis=0)
-
-    console.print("[bold]Running MiniBatchKMeans clustering...[/bold]")
-    kmeans = MiniBatchKMeans(
+    options = PrepareOptions(
+        images_dir=images_dir,
+        workdir=workdir,
         n_clusters=n_clusters,
+        superpixels=superpixels,
+        compactness=compactness,
         batch_size=batch_size,
         random_state=random_state,
-        n_init="auto",
-        max_iter=100,
+        workers=workers,
     )
-    cluster_ids = kmeans.fit_predict(features_matrix)
 
-    summary_entries: list[dict[str, object]] = []
-    for cluster_id in range(n_clusters):
-        indices = np.where(cluster_ids == cluster_id)[0]
-        if len(indices) == 0:
-            continue
-        coverage = float(sum(metadata[idx]["area"] for idx in indices))
-        sample = [
-            {
-                "image": metadata[idx]["image"],
-                "segment_id": metadata[idx]["segment_id"],
-                "centroid": metadata[idx]["centroid"],
-                "area": round(float(metadata[idx]["area"]), 5),
-            }
-            for idx in indices[: min(5, len(indices))]
-        ]
-        summary_entries.append(
-            {
-                "cluster_id": int(cluster_id),
-                "count": int(len(indices)),
-                "coverage": coverage,
-                "sample_segments": sample,
-            }
-        )
+    def log(message: str) -> None:
+        console.print(message)
 
-    assignments = [
-        {
-            "image": metadata[idx]["image"],
-            "segment_id": metadata[idx]["segment_id"],
-            "cluster_id": int(cluster_ids[idx]),
-            "centroid": metadata[idx]["centroid"],
-            "area": round(float(metadata[idx]["area"]), 5),
-        }
-        for idx in range(len(metadata))
-    ]
-
-    summary = {
-        "prepared_at": datetime.utcnow().isoformat(timespec="seconds"),
-        "images": processed_images,
-        "segments": len(metadata),
-        "clusters": n_clusters,
-        "superpixels": superpixels,
-        "compactness": compactness,
-        "entries": summary_entries,
-    }
-
-    np.save(workdir / FEATURES_FILE, features_matrix)
-    np.save(workdir / CLUSTER_IDS_FILE, cluster_ids)
-    (workdir / METADATA_FILE).write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
-    (workdir / SUMMARY_FILE).write_text(json.dumps(summary, indent=2, ensure_ascii=False))
-    (workdir / ASSIGNMENTS_FILE).write_text(json.dumps(assignments, indent=2, ensure_ascii=False))
-
-    bundle = {
-        "feature_version": FEATURE_VERSION,
-        "kmeans": kmeans,
-        "scaler": None,
-        "classifier": None,
-        "labels": [],
-        "cluster_to_label": {},
-        "config": {
-            "superpixels": superpixels,
-            "compactness": compactness,
-            "n_clusters": n_clusters,
-            "prepared_at": datetime.utcnow().isoformat(timespec="seconds"),
-        },
-    }
-    joblib.dump(bundle, model_target)
-
-    console.print(f"[bold green]Clustering complete. Model saved to {model_target}[/bold green]")
-    console.print(
-        f"[dim]Next steps:[/dim] Review {SUMMARY_FILE} / {ASSIGNMENTS_FILE}, create a group-label JSON, then run `cubiai train label`."
-    )
+    try:
+        run_prepare(options, log=log)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
@@ -271,36 +78,62 @@ def review(
     superpixels: int | None = typer.Option(None, help="Override SLIC superpixels for previews."),
     compactness: float | None = typer.Option(None, help="Override SLIC compactness for previews."),
     image_root: Path | None = typer.Option(None, help="Override base path for original images."),
-    browser: bool = typer.Option(True, "--browser/--no-browser", help="Open the Streamlit UI in a browser."),
 ) -> None:
-    """Launch the Streamlit cluster reviewer."""
+    """Launch the PySide6 cluster reviewer."""
 
-    viewer_script = Path(__file__).resolve().parents[2] / "viewers" / "cluster_review.py"
-    if not viewer_script.exists():
-        console.print(f"[bold red]Viewer script missing:[/bold red] {viewer_script}")
-        raise typer.Exit(code=1)
+    cluster_review.launch(
+        workdir=workdir,
+        superpixels=superpixels,
+        compactness=compactness,
+        image_root=image_root,
+    )
 
-    streamlit_bin = shutil.which("streamlit")
-    if not streamlit_bin:
-        console.print(
-            "[bold red]Streamlit is not installed.[/bold red] Install the optional viewer extras: "
-            "`uv sync --extra viewer`"
+
+@app.command()
+def ui(
+    workdir: Path = typer.Argument(..., help="Directory where clustering artifacts are written."),
+    prepare_images: Path | None = typer.Option(
+        None,
+        "--prepare-images",
+        help="Optional image directory to run prepare before launching the UI.",
+    ),
+    n_clusters: int = typer.Option(64, "--clusters", min=2, help="Clusters for optional prepare."),
+    superpixels: int = typer.Option(300, "--superpixels", min=32, help="SLIC superpixels for prepare and viewer."),
+    compactness: float = typer.Option(8.0, "--compactness", min=0.1, help="SLIC compactness."),
+    batch_size: int = typer.Option(2048, "--batch-size", min=32, help="MiniBatchKMeans batch size."),
+    random_state: int = typer.Option(42, "--random-state", help="Random seed for clustering."),
+    workers: Optional[int] = typer.Option(None, "--workers", min=1, help="Worker threads for prepare."),
+    image_root: Path | None = typer.Option(None, help="Override base path for original images."),
+) -> None:
+    """Run (optional) prepare and open the desktop reviewer."""
+
+    if prepare_images is not None:
+        options = PrepareOptions(
+            images_dir=prepare_images,
+            workdir=workdir,
+            n_clusters=n_clusters,
+            superpixels=superpixels,
+            compactness=compactness,
+            batch_size=batch_size,
+            random_state=random_state,
+            workers=workers,
         )
-        raise typer.Exit(code=1)
+        console.print("[bold]Running prepare before launching the viewer…[/bold]")
+        try:
+            run_prepare(options, log=lambda msg: console.print(msg))
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        if image_root is None:
+            image_root = prepare_images
+    elif image_root is None:
+        image_root = workdir
 
-    cmd = [streamlit_bin, "run", str(viewer_script), "--", str(workdir)]
-    if image_root is not None:
-        cmd.extend(["--image-root", str(image_root)])
-    if superpixels is not None:
-        cmd.extend(["--superpixels", str(superpixels)])
-    if compactness is not None:
-        cmd.extend(["--compactness", str(compactness)])
-    if not browser:
-        cmd.extend(["--browser.serverAddress", "localhost", "--server.headless", "true"])
-
-    console.print(f"[bold]Launching cluster reviewer:[/bold] {' '.join(cmd)}")
-    result = subprocess.run(cmd, check=False)
-    raise typer.Exit(code=result.returncode)
+    cluster_review.launch(
+        workdir=workdir,
+        superpixels=superpixels,
+        compactness=compactness,
+        image_root=image_root,
+    )
 
 
 @app.command()
@@ -320,10 +153,10 @@ def label(
     if not workdir.exists():
         raise typer.BadParameter(f"Workdir not found: {workdir}")
 
-    features_path = workdir / FEATURES_FILE
-    cluster_ids_path = workdir / CLUSTER_IDS_FILE
-    metadata_path = workdir / METADATA_FILE
-    model_target = model_path or (workdir / MODEL_FILE)
+    features_path = workdir / "features.npy"
+    cluster_ids_path = workdir / "cluster_ids.npy"
+    metadata_path = workdir / "metadata.json"
+    model_target = model_path or (workdir / "cluster_labeler.joblib")
 
     for required in (features_path, cluster_ids_path, metadata_path, model_target):
         if not required.exists():

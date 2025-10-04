@@ -63,27 +63,30 @@ uv run cubiai process ./input/character.png \
 Train the semi-supervised cluster annotator (skips files containing `.preview`):
 
 
-### Review clusters in Streamlit
+### Review clusters in the Qt viewer
 
-Install the optional viewer extras, then launch via the CLI:
+Install the optional viewer extras (PySide6) and launch the desktop UI:
 
 ```bash
 uv sync --extra viewer
-uv run cubiai train review data
+uv run cubiai train ui ./data/raw/danbooru2023 ./data/train
 ```
 
-The reviewer opens in your browser and reads the `cubiai train prepare` artifacts from the supplied workdir.
-Use the sidebar to choose a cluster, inspect highlighted segments, and decide which IDs belong in your group-label JSON.
+A desktop window opens and reads the `cubiai train prepare` artifacts from the supplied workdir.
+Select clusters from the list, preview highlighted segments, and decide which IDs belong in your group-label JSON.
+If you already have clustering artifacts, run 
+`uv run cubiai train ui --skip-prepare --image-root ./data/raw/danbooru2023 ./data/raw/danbooru2023 ./data/train`
+and the command will launch the viewer without reprocessing images.
 
 ```bash
-PYTHONPATH=src python train.py prepare data/raw/danbooru2023 ./models/cluster_workdir \
+uv run cubiai train prepare data/raw/danbooru2023 ./models/cluster_workdir \
     --clusters 64 --superpixels 320
 ```
 
 After reviewing `cluster_summary.json`, attach group labels and refine the classifier:
 
 ```bash
-PYTHONPATH=src python train.py label ./models/cluster_workdir ./annotations/group_labels.json
+uv run cubiai train label ./models/cluster_workdir ./annotations/group_labels.json
 ```
 
 Generate LabelMe annotations (cluster backend runs by default):

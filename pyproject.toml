@@ -27,19 +27,14 @@ dependencies = [
     "skia-python>=87.5",
     "tqdm>=4.66.0",
     "scikit-learn>=1.5.0",
+    "PySide6>=6.7.0"
 ]
 
 [project.optional-dependencies]
-gui = [
-    "PySide6>=6.7.0",
-    "qasync>=0.26.0"
-]
 dev = [
     "pytest>=8.2.0"
 ]
-viewer = [
-    "streamlit>=1.37.0"
-]
+
 
 [project.scripts]
 cubiai = "cubiai.__main__:main"
