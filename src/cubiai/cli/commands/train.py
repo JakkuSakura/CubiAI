@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import os
@@ -261,6 +263,44 @@ def prepare(
     console.print(
         f"[dim]Next steps:[/dim] Review {SUMMARY_FILE} / {ASSIGNMENTS_FILE}, create a group-label JSON, then run `cubiai train label`."
     )
+
+
+@app.command()
+def review(
+    workdir: Path = typer.Argument(..., help="Path to the prepare() output directory."),
+    superpixels: int | None = typer.Option(None, help="Override SLIC superpixels for previews."),
+    compactness: float | None = typer.Option(None, help="Override SLIC compactness for previews."),
+    image_root: Path | None = typer.Option(None, help="Override base path for original images."),
+    browser: bool = typer.Option(True, "--browser/--no-browser", help="Open the Streamlit UI in a browser."),
+) -> None:
+    """Launch the Streamlit cluster reviewer."""
+
+    viewer_script = Path(__file__).resolve().parents[2] / "viewers" / "cluster_review.py"
+    if not viewer_script.exists():
+        console.print(f"[bold red]Viewer script missing:[/bold red] {viewer_script}")
+        raise typer.Exit(code=1)
+
+    streamlit_bin = shutil.which("streamlit")
+    if not streamlit_bin:
+        console.print(
+            "[bold red]Streamlit is not installed.[/bold red] Install the optional viewer extras: "
+            "`uv sync --extra viewer`"
+        )
+        raise typer.Exit(code=1)
+
+    cmd = [streamlit_bin, "run", str(viewer_script), "--", str(workdir)]
+    if image_root is not None:
+        cmd.extend(["--image-root", str(image_root)])
+    if superpixels is not None:
+        cmd.extend(["--superpixels", str(superpixels)])
+    if compactness is not None:
+        cmd.extend(["--compactness", str(compactness)])
+    if not browser:
+        cmd.extend(["--browser.serverAddress", "localhost", "--server.headless", "true"])
+
+    console.print(f"[bold]Launching cluster reviewer:[/bold] {' '.join(cmd)}")
+    result = subprocess.run(cmd, check=False)
+    raise typer.Exit(code=result.returncode)
 
 
 @app.command()

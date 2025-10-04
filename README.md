@@ -62,6 +62,19 @@ uv run cubiai process ./input/character.png \
 
 Train the semi-supervised cluster annotator (skips files containing `.preview`):
 
+
+### Review clusters in Streamlit
+
+Install the optional viewer extras, then launch via the CLI:
+
+```bash
+uv sync --extra viewer
+uv run cubiai train review data
+```
+
+The reviewer opens in your browser and reads the `cubiai train prepare` artifacts from the supplied workdir.
+Use the sidebar to choose a cluster, inspect highlighted segments, and decide which IDs belong in your group-label JSON.
+
 ```bash
 PYTHONPATH=src python train.py prepare data/raw/danbooru2023 ./models/cluster_workdir \
     --clusters 64 --superpixels 320

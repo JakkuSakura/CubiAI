@@ -37,6 +37,9 @@ gui = [
 dev = [
     "pytest>=8.2.0"
 ]
+viewer = [
+    "streamlit>=1.37.0"
+]
 
 [project.scripts]
 cubiai = "cubiai.__main__:main"
