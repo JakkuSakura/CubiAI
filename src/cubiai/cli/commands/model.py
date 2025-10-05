@@ -77,6 +77,7 @@ def infer(
     size: int = typer.Option(1024, help="Resize/crop size"),
     low_res: int = typer.Option(256, help="Flow estimation resolution"),
     strength: float = typer.Option(1.0, help="Deformation strength"),
+    driver_domain: int = typer.Option(0, help="Driver domain id (0=default, 1=real, etc.)"),
     output: Path = typer.Option(Path("output.png"), help="Where to save the rendered result"),
     device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> None:
@@ -106,7 +107,7 @@ def infer(
     model = model.to(device)
 
     with torch.no_grad():
-        out = model(src.to(device), drv.to(device), strength=strength)
+        out = model(src.to(device), drv.to(device), strength=strength, driver_domain=driver_domain)
         result = out["output"].clamp(-1, 1)
         result = ((result[0].cpu() + 1.0) * 0.5).permute(1, 2, 0).numpy()
         from PIL import Image
