@@ -62,30 +62,30 @@ uv run cubiai process ./input/character.png \
 
 ### Train the pass-through animator
 
-Organise your dataset as `root/video_id/frame.png`. Each folder should contain sequential frames from a capture or paired video. Then run:
+Organise your dataset as:
+
+```
+<dataset_root>/
+  alice.png              # portrait
+  alice_video/00000000.png  # driver frames
+  alice_video/00000001.png
+  ...
+```
+
+Each portrait image needs a sibling folder named `<stem>_video` containing the driver frames. Then train with:
 
 ```bash
 uv sync
-uv run python scripts/train_pass_through.py ./dataset/live2d ./runs/pass_through \
-    --size 1024 --low-res 256 --batch 1 --steps 2000
+uv run cubiai model train ./dataset_root ./runs/pass_through     --size 1024 --low-res 256 --batch 1 --steps 2000
 ```
 
-The script trains the flow+mask model, prints metrics, and writes `preview.png` with a sample result. Adjust `--size`, `--steps`, and other flags as needed. For inference, import `PassThroughAnimator` and call it with a source (`S`) and driver (`D`) frame:
-
-```python
-from cubiai.models.pass_through_animator import PassThroughAnimator
-model = PassThroughAnimator(low_res=256).to(device)
-with torch.no_grad():
-    result = model(source_tensor, driver_tensor)["output"]
-```
-
-Generate LabelMe annotations (cluster backend runs by default):
+After training, run the animator on a single source/driver pair:
 
 ```bash
-uv run cubiai annotate ./input/character.png --output ./build/character/character.labelme.json
+uv run cubiai model infer portrait.png driver_frame.png     --checkpoint ./runs/pass_through/pass_through.pt     --output ./outputs/animated.png
 ```
 
-Need a language model instead? Pass `--strategy codex` (and optionally labels/instructions) to fall back to the Codex-driven pipeline.
+You can expose the `--strength`, `--low-res`, and image `--size` flags to control deformation intensity and flow resolution.
 
 > **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
 

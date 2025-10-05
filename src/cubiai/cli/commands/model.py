@@ -20,8 +20,8 @@ app = typer.Typer(help="Commands for training and evaluating the pass-through an
 
 @app.command()
 def train(
-    data_root: Path = typer.Argument(..., help="Dataset organised as root/video_id/frame.png"),
-    workdir: Path = typer.Argument(Path("runs/pass_through"), help="Where to save artifacts"),
+    data_root: Path = typer.Argument(..., help="Dataset with portrait.png + portrait_video/frame.png"),
+    workdir: Path = typer.Argument(Path("runs/animator"), help="Where to save artifacts"),
     size: int = typer.Option(1024, help="High-resolution size"),
     low_res: int = typer.Option(256, help="Resolution for flow estimation"),
     steps: int = typer.Option(2000, help="Total optimisation steps"),

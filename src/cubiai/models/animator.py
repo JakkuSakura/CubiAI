@@ -1,7 +1,6 @@
 """Lightweight pass-through animator with learned flow and mask."""
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -176,25 +175,36 @@ class PairSample:
     driver: torch.Tensor
     target: torch.Tensor
 
-class FolderPairDataset(Dataset):
-    """Dataset organised as root/video_id/frame.png."""
+class PortraitVideoDataset(Dataset):
+    """Matches portrait images with frames from a sibling *_video folder."""
 
     def __init__(self, root: Path | str, *, size: int = 1024, exts: Tuple[str, ...] = (".png", ".jpg", ".jpeg")) -> None:
         super().__init__()
         self.root = Path(root)
         self.size = size
         self.exts = exts
-        self.videos: List[List[Path]] = []
-        for video_dir in sorted(self.root.iterdir()):
+        self.pairs: List[Tuple[Path, List[Path]]] = []
+
+        for portrait_path in sorted(self.root.iterdir()):
+            if not portrait_path.is_file() or portrait_path.suffix.lower() not in self.exts:
+                continue
+            video_dir = self.root / f"{portrait_path.stem}_video"
             if not video_dir.is_dir():
                 continue
             frames = [p for p in sorted(video_dir.iterdir()) if p.suffix.lower() in self.exts]
-            if len(frames) < 4:
+            if len(frames) < 1:
                 continue
-            self.videos.append(frames)
-        self.index: List[Tuple[int, int]] = [(vid_idx, f_idx) for vid_idx, frames in enumerate(self.videos) for f_idx in range(len(frames))]
+            self.pairs.append((portrait_path, frames))
+
+        self.index: List[Tuple[int, int]] = [
+            (pair_idx, frame_idx)
+            for pair_idx, (_, frames) in enumerate(self.pairs)
+            for frame_idx in range(len(frames))
+        ]
         if not self.index:
-            raise ValueError(f"No video folders with enough frames found in {self.root}")
+            raise ValueError(
+                "No portrait/video pairs found. Expected layout: name.png alongside name_video/frame.png"
+            )
 
     def __len__(self) -> int:
         return len(self.index)
@@ -215,12 +225,11 @@ class FolderPairDataset(Dataset):
             return tensor
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        vid_idx, src_idx = self.index[idx]
-        frames = self.videos[vid_idx]
-        drv_idx = random.randrange(0, len(frames))
-        src = self._prepare_image(frames[src_idx], self.size)
-        drv = self._prepare_image(frames[drv_idx], self.size)
-        tgt = self._prepare_image(frames[drv_idx], self.size)
+        pair_idx, frame_idx = self.index[idx]
+        portrait_path, frames = self.pairs[pair_idx]
+        src = self._prepare_image(portrait_path, self.size)
+        drv = self._prepare_image(frames[frame_idx], self.size)
+        tgt = drv.clone()
         return src, drv, tgt
 
 
@@ -274,7 +283,7 @@ class PassThroughTrainer:
 # -----------------------------------------------------------------------------
 
 def create_dataloader(root: Path | str, *, size: int = 1024, batch_size: int = 1, num_workers: int = 2, shuffle: bool = True) -> DataLoader:
-    dataset = FolderPairDataset(root=root, size=size)
+    dataset = PortraitVideoDataset(root=root, size=size)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, drop_last=True)
 
 
@@ -282,7 +291,7 @@ __all__ = [
     "PassThroughAnimator",
     "PassThroughTrainer",
     "TrainerConfig",
-    "FolderPairDataset",
+    "PortraitVideoDataset",
     "create_dataloader",
     "warp_with_flow",
     "total_variation",
