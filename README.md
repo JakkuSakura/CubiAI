@@ -60,35 +60,23 @@ uv run cubiai process ./input/character.png \
     --output-dir ./build/character
 ```
 
-Train the semi-supervised cluster annotator (skips files containing `.preview`):
+### Train the pass-through animator
 
-
-### Review clusters in the Qt viewer
-
-Launch the desktop UI after syncing dependencies:
+Organise your dataset as `root/video_id/frame.png`. Each folder should contain sequential frames from a capture or paired video. Then run:
 
 ```bash
 uv sync
-uv run cubiai train ui ./data/train --prepare-images ./data/raw/danbooru2023
+uv run python scripts/train_pass_through.py ./dataset/live2d ./runs/pass_through \
+    --size 1024 --low-res 256 --batch 1 --steps 2000
 ```
 
-The window runs the optional prepare step (if requested) and then loads the artifacts from the supplied workdir.
-Browse clusters, preview highlighted segments, and decide which IDs belong in your group-label JSON.
-If you already have clustering outputs, skip the prepare phase and just point the viewer at your images:
+The script trains the flow+mask model, prints metrics, and writes `preview.png` with a sample result. Adjust `--size`, `--steps`, and other flags as needed. For inference, import `PassThroughAnimator` and call it with a source (`S`) and driver (`D`) frame:
 
-```bash
-uv run cubiai train ui ./data/train --image-root ./data/raw/danbooru2023
-```
-
-```bash
-uv run cubiai train prepare data/raw/danbooru2023 ./models/cluster_workdir \
-    --clusters 64 --superpixels 320
-```
-
-After reviewing `cluster_summary.json`, attach group labels and refine the classifier:
-
-```bash
-uv run cubiai train label ./models/cluster_workdir ./annotations/group_labels.json
+```python
+from cubiai.models.pass_through_animator import PassThroughAnimator
+model = PassThroughAnimator(low_res=256).to(device)
+with torch.no_grad():
+    result = model(source_tensor, driver_tensor)["output"]
 ```
 
 Generate LabelMe annotations (cluster backend runs by default):
@@ -98,8 +86,6 @@ uv run cubiai annotate ./input/character.png --output ./build/character/characte
 ```
 
 Need a language model instead? Pass `--strategy codex` (and optionally labels/instructions) to fall back to the Codex-driven pipeline.
-
-Cluster defaults live under `annotation.cluster` (model path, SLIC parameters, probability threshold). The Codex backend still relies on `annotation.llm` for credentials, model selection, and CLI overrides such as `--model`, `--codex-binary`, and `--extra-cli-arg`.
 
 > **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
 
