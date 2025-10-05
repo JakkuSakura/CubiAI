@@ -65,18 +65,20 @@ Train the semi-supervised cluster annotator (skips files containing `.preview`):
 
 ### Review clusters in the Qt viewer
 
-Install the optional viewer extras (PySide6) and launch the desktop UI:
+Launch the desktop UI after syncing dependencies:
 
 ```bash
-uv sync --extra viewer
-uv run cubiai train ui ./data/raw/danbooru2023 ./data/train
+uv sync
+uv run cubiai train ui ./data/train --prepare-images ./data/raw/danbooru2023
 ```
 
-A desktop window opens and reads the `cubiai train prepare` artifacts from the supplied workdir.
-Select clusters from the list, preview highlighted segments, and decide which IDs belong in your group-label JSON.
-If you already have clustering artifacts, run 
-`uv run cubiai train ui --skip-prepare --image-root ./data/raw/danbooru2023 ./data/raw/danbooru2023 ./data/train`
-and the command will launch the viewer without reprocessing images.
+The window runs the optional prepare step (if requested) and then loads the artifacts from the supplied workdir.
+Browse clusters, preview highlighted segments, and decide which IDs belong in your group-label JSON.
+If you already have clustering outputs, skip the prepare phase and just point the viewer at your images:
+
+```bash
+uv run cubiai train ui ./data/train --image-root ./data/raw/danbooru2023
+```
 
 ```bash
 uv run cubiai train prepare data/raw/danbooru2023 ./models/cluster_workdir \

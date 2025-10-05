@@ -1,7 +1,10 @@
 """Shared utilities for running the SLIC-based clustering prepare step."""
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -107,7 +110,8 @@ def run_prepare(
     metadata: list[dict[str, object]] = []
     processed_images = 0
 
-    max_workers = options.workers or os.cpu_count() or 1
+    # max_workers = options.workers or os.cpu_count() or 1
+    max_workers = 1
 
     if max_workers <= 1:
         iterator = tqdm(image_paths, desc="Images", unit="img")
