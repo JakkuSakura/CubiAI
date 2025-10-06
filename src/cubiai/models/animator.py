@@ -8,42 +8,9 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from PIL import Image
 from PIL.Image import Resampling
 from torch.utils.data import Dataset, DataLoader
-
-# -----------------------------------------------------------------------------
-# Warping utilities
-# -----------------------------------------------------------------------------
-
-
-def make_base_grid(height: int, width: int, device: torch.device) -> torch.Tensor:
-    ys, xs = torch.meshgrid(
-        torch.linspace(-1.0, 1.0, height, device=device),
-        torch.linspace(-1.0, 1.0, width, device=device),
-        indexing="ij",
-    )
-    return torch.stack([xs, ys], dim=-1)
-
-
-def warp_with_flow(img: torch.Tensor, flow_norm: torch.Tensor) -> torch.Tensor:
-    b_img, _, h, w = img.shape
-    b_flow = flow_norm.shape[0]
-    if b_flow != b_img:
-        if b_flow == 1:
-            flow_norm = flow_norm.expand(b_img, -1, -1, -1)
-        elif b_img == 1:
-            img = img.expand(b_flow, -1, -1, -1)
-            b_img = b_flow
-        else:
-            raise RuntimeError(
-                f"grid_sampler expects matching batch sizes, got img batch {b_img}, flow batch {b_flow}"
-            )
-    base = make_base_grid(h, w, img.device).unsqueeze(0).repeat(b_img, 1, 1, 1)
-    grid = base + flow_norm.permute(0, 2, 3, 1)
-    return F.grid_sample(img, grid, mode="bilinear", padding_mode="border", align_corners=True)
-
 
 def total_variation(x: torch.Tensor) -> torch.Tensor:
     tv_h = (x[:, :, 1:, :] - x[:, :, :-1, :]).abs().mean()
@@ -100,7 +67,7 @@ class MotionEncoder(nn.Module):
         return latent
 
 
-class FlowUNet(nn.Module):
+class ImageUNet(nn.Module):
     def __init__(self, in_ch: int = 6, base_ch: int = 64, latent_dim: int = 128) -> None:
         super().__init__()
         ch = base_ch
@@ -122,8 +89,7 @@ class FlowUNet(nn.Module):
         self.dec2 = ConvBlock(ch * 2 + ch * 2, ch * 2)
         self.dec1 = ConvBlock(ch + ch, ch)
 
-        self.flow_head = nn.Conv2d(ch, 2, kernel_size=3, padding=1)
-        self.mask_head = nn.Conv2d(ch, 1, kernel_size=3, padding=1)
+        self.rgb_head = nn.Conv2d(ch, 3, kernel_size=3, padding=1)
 
         self.film4 = nn.Linear(latent_dim, ch * 8 * 2)
         self.film3 = nn.Linear(latent_dim, ch * 4 * 2)
@@ -137,7 +103,7 @@ class FlowUNet(nn.Module):
         beta = beta.view(-1, channels, 1, 1)
         return tensor * (1.0 + gamma) + beta
 
-    def forward(self, x: torch.Tensor, control: torch.Tensor | None = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, control: torch.Tensor | None = None) -> torch.Tensor:
         e1 = self.enc1(x)
         e2 = self.enc2(e1)
         e3 = self.enc3(e2)
@@ -148,39 +114,34 @@ class FlowUNet(nn.Module):
 
         u4 = self.up4(b)
         d4 = self.dec4(torch.cat([u4, e4], dim=1))
-        u3 = self.up3(d4)
-        d3 = self.dec3(torch.cat([u3, e3], dim=1))
-        u2 = self.up2(d3)
-        d2 = self.dec2(torch.cat([u2, e2], dim=1))
-        u1 = self.up1(d2)
-        d1 = self.dec1(torch.cat([u1, e1], dim=1))
-
         if control is not None:
             d4 = self._apply_film(d4, self.film4(control), d4.shape[1])
+        u3 = self.up3(d4)
+        d3 = self.dec3(torch.cat([u3, e3], dim=1))
+        if control is not None:
             d3 = self._apply_film(d3, self.film3(control), d3.shape[1])
+        u2 = self.up2(d3)
+        d2 = self.dec2(torch.cat([u2, e2], dim=1))
+        if control is not None:
             d2 = self._apply_film(d2, self.film2(control), d2.shape[1])
+        u1 = self.up1(d2)
+        d1 = self.dec1(torch.cat([u1, e1], dim=1))
+        if control is not None:
             d1 = self._apply_film(d1, self.film1(control), d1.shape[1])
 
-        flow = torch.tanh(self.flow_head(d1))
-        mask = torch.sigmoid(self.mask_head(d1))
-        return flow, mask
+        residual = torch.tanh(self.rgb_head(d1))
+        return residual
 
 
-class PassThroughAnimator(nn.Module):
+class Animator(nn.Module):
     def __init__(
         self,
         *,
-        low_res: int = 256,
         latent_dim: int = 128,
-        max_flow: float = 0.08,
-        mask_bias: float = 0.3,
         num_domains: int = 2,
     ) -> None:
         super().__init__()
-        self.low_res = low_res
-        self.max_flow = max_flow
-        self.mask_bias = mask_bias
-        self.flow_net = FlowUNet(in_ch=6, base_ch=64, latent_dim=latent_dim)
+        self.translator = ImageUNet(in_ch=6, base_ch=64, latent_dim=latent_dim)
         self.motion_encoder = MotionEncoder(in_ch=3, base_ch=32, latent_dim=latent_dim)
         self.domain_embed = nn.Embedding(num_domains, latent_dim)
 
@@ -192,12 +153,8 @@ class PassThroughAnimator(nn.Module):
         strength: float = 1.0,
         driver_domain: int | torch.Tensor | None = None,
     ) -> Dict[str, torch.Tensor]:
-        b, _, h, w = src_hr.shape
-        src_lr = F.interpolate(src_hr, size=(self.low_res, self.low_res), mode="bilinear", align_corners=True)
-        drv_lr = F.interpolate(drv_hr, size=(self.low_res, self.low_res), mode="bilinear", align_corners=True)
-        flow_input = torch.cat([src_lr, drv_lr], dim=1)
-
-        latent = self.motion_encoder(drv_lr)
+        b = src_hr.shape[0]
+        latent = self.motion_encoder(drv_hr)
         if driver_domain is not None:
             if isinstance(driver_domain, torch.Tensor):
                 domain_vec = self.domain_embed(driver_domain.to(latent.device))
@@ -208,22 +165,12 @@ class PassThroughAnimator(nn.Module):
             latent = latent + domain_vec
         latent = latent / (latent.norm(dim=-1, keepdim=True) + 1e-6)
 
-        flow_lr, mask_lr = self.flow_net(flow_input, control=latent)
-        flow_lr = flow_lr * (self.max_flow * strength)
-        mask_lr = torch.sigmoid(mask_lr - self.mask_bias)
-
-        flow_hr = F.interpolate(flow_lr, size=(h, w), mode="bilinear", align_corners=True)
-        mask_hr = F.interpolate(mask_lr, size=(h, w), mode="bilinear", align_corners=True)
-
-        warped = warp_with_flow(src_hr, flow_hr)
-        out = mask_hr * warped + (1.0 - mask_hr) * src_hr
+        translator_input = torch.cat([src_hr, drv_hr], dim=1)
+        residual = self.translator(translator_input, control=latent)
+        output = torch.tanh(src_hr + strength * residual)
 
         return {
-            "output": out,
-            "warped": warped,
-            "mask": mask_hr,
-            "flow": flow_hr,
-            "control": latent,
+            "output": output,
         }
 
 # -----------------------------------------------------------------------------
@@ -302,16 +249,15 @@ class PortraitVideoDataset(Dataset):
 
 @dataclass(slots=True)
 class TrainerConfig:
-    lambda_tv: float = 0.1
-    lambda_mask: float = 0.02
+    lambda_color: float = 0.3
+    lambda_motion: float = 0.1
     lambda_identity: float = 0.1
-    lambda_control: float = 0.01
     clip_grad: float = 1.0
     strength: float = 1.0
 
 
 class PassThroughTrainer:
-    def __init__(self, model: PassThroughAnimator, *, lr: float = 2e-4, device: str | torch.device = "cuda") -> None:
+    def __init__(self, model: Animator, *, lr: float = 2e-4, device: str | torch.device = "cuda") -> None:
         self.device = torch.device(device)
         self.model = model.to(self.device)
         self.opt = torch.optim.AdamW(self.model.parameters(), lr=lr, betas=(0.5, 0.999), weight_decay=1e-4)
@@ -325,16 +271,13 @@ class PassThroughTrainer:
 
         out = self.model(src, drv, strength=cfg.strength, driver_domain=domain)
         pred = out["output"]
-        flow = out["flow"]
-        mask = out["mask"]
-        control = out["control"]
 
         loss_rec = (pred - tgt).abs().mean()
-        loss_tv = total_variation(flow)
-        loss_mask = mask.mean()
-        loss_control = control.pow(2).mean()
+        residual = pred - src  # residual encodes per-pixel deviation from the source
+        loss_color = residual.pow(2).mean()
+        loss_motion = total_variation(residual)  # penalise spatially large or abrupt movements
 
-        loss = loss_rec + cfg.lambda_tv * loss_tv + cfg.lambda_mask * loss_mask + cfg.lambda_control * loss_control
+        loss = loss_rec + cfg.lambda_color * loss_color + cfg.lambda_motion * loss_motion
 
         if cfg.lambda_identity > 0:
             out_id = self.model(src, src, strength=0.2, driver_domain=domain)
@@ -351,11 +294,10 @@ class PassThroughTrainer:
         return {
             "loss": float(loss.detach().cpu()),
             "l_rec": float(loss_rec.detach().cpu()),
-            "l_tv": float(loss_tv.detach().cpu()),
-            "l_mask": float(loss_mask.detach().cpu()),
-            "l_control": float(loss_control.detach().cpu()),
+            "l_color": float(loss_color.detach().cpu()),
+            "l_motion": float(loss_motion.detach().cpu()),
             "l_id": float(loss_id.detach().cpu()),
-            "flow_mag": float(flow.abs().mean().detach().cpu()),
+            "residual_mag": float(residual.abs().mean().detach().cpu()),
         }
 
 # -----------------------------------------------------------------------------
@@ -369,11 +311,10 @@ def create_dataloader(root: Path | str, *, size: int = 1024, batch_size: int = 1
 
 
 __all__ = [
-    "PassThroughAnimator",
+    "Animator",
     "PassThroughTrainer",
     "TrainerConfig",
     "PortraitVideoDataset",
     "create_dataloader",
-    "warp_with_flow",
     "total_variation",
 ]
