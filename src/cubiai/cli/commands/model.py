@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 import torch
 import typer
 from PIL.Image import Resampling
+
+from tqdm.auto import tqdm
 
 from ...models.animator import Animator, PassThroughTrainer, TrainerConfig, create_dataloader
 
@@ -15,17 +18,17 @@ app = typer.Typer(help="Commands for training and evaluating the pass-through an
 
 @app.command()
 def train(
-    data_root: Path = typer.Argument(..., help="Dataset with portrait.png + portrait_video/frame.png"),
-    workdir: Path = typer.Argument(Path("runs/animator"), help="Where to save artifacts"),
-    size: int = typer.Option(1024, help="High-resolution size"),
-    steps: int = typer.Option(200, help="Total optimisation steps"),
-    batch: int = typer.Option(1, help="Batch size"),
-    epochs: int = typer.Option(1, help="Epochs (upper bound if dataset small)"),
-    lr: float = typer.Option(2e-4, help="Learning rate"),
-    lambda_align: float = typer.Option(0.3, help="Weight for driver-aligned motion"),
-    lambda_motion: float = typer.Option(0.1, help="Weight for motion magnitude penalty"),
-    device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu", help="Torch device"),
-    num_workers: int = typer.Option(2, help="DataLoader workers"),
+        data_root: Path = typer.Argument(..., help="Dataset with portrait.png + portrait_video/frame.png"),
+        workdir: Path = typer.Argument(Path("runs/animator"), help="Where to save artifacts"),
+        size: int = typer.Option(1024, help="High-resolution size"),
+        steps: int = typer.Option(200, help="Total optimisation steps"),
+        batch: int = typer.Option(1, help="Batch size"),
+        epochs: int = typer.Option(1, help="Epochs (upper bound if dataset small)"),
+        lr: float = typer.Option(2e-4, help="Learning rate"),
+        lambda_align: float = typer.Option(0.3, help="Weight for driver-aligned motion"),
+        lambda_motion: float = typer.Option(0.1, help="Weight for motion magnitude penalty"),
+        device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu", help="Torch device"),
+        num_workers: int = typer.Option(2, help="DataLoader workers"),
 ) -> None:
     """Train the pass-through animator on the given dataset."""
 
@@ -38,16 +41,39 @@ def train(
     )
 
     global_step = 0
+    start_time = perf_counter()
+
+    progress = tqdm(total=steps, desc="training", unit="step", dynamic_ncols=True)
+
     for epoch in range(epochs):
         for batch_data in dataloader:
             metrics = trainer.training_step(batch_data, cfg)
-            if global_step % 50 == 0:
-                typer.echo(f"step {global_step}: {metrics}")
             global_step += 1
+
+            progress.update(1)
+            if global_step % 50 == 0:
+                progress.set_postfix(
+                    {k: f"{v:.3f}" for k, v in metrics.items()}, refresh=False
+                )
+
+            elif global_step % 50 == 0:
+                elapsed = perf_counter() - start_time
+                rate = elapsed / global_step if global_step > 0 else 0.0
+                remaining = max(steps - global_step, 0)
+                eta = remaining * rate
+                typer.echo(
+                    f"step {global_step}/{steps} | eta {eta:0.1f}s | metrics {metrics}"
+                )
+
             if global_step >= steps:
                 break
         if global_step >= steps:
             break
+
+    progress.close()
+
+    total_elapsed = perf_counter() - start_time
+    typer.echo(f"training finished in {total_elapsed:0.1f}s over {global_step} steps")
 
     # Save checkpoint and quick preview
     workdir.mkdir(parents=True, exist_ok=True)
@@ -83,14 +109,14 @@ def train(
 
 @app.command()
 def infer(
-    source: Path = typer.Argument(..., help="Path to source image"),
-    driver: Path = typer.Argument(..., help="Path to driver image"),
-    checkpoint: Path = typer.Option(Path("runs/pass_through/pass_through.pt"), help="Model weights"),
-    size: int = typer.Option(1024, help="Resize/crop size"),
-    strength: float = typer.Option(1.0, help="Deformation strength"),
-    driver_domain: int = typer.Option(0, help="Driver domain id (0=default, 1=real, etc.)"),
-    output: Path = typer.Option(Path("output.png"), help="Where to save the rendered result"),
-    device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu"),
+        source: Path = typer.Argument(..., help="Path to source image"),
+        driver: Path = typer.Argument(..., help="Path to driver image"),
+        checkpoint: Path = typer.Option(Path("runs/pass_through/pass_through.pt"), help="Model weights"),
+        size: int = typer.Option(1024, help="Resize/crop size"),
+        strength: float = typer.Option(1.0, help="Deformation strength"),
+        driver_domain: int = typer.Option(0, help="Driver domain id (0=default, 1=real, etc.)"),
+        output: Path = typer.Option(Path("output.png"), help="Where to save the rendered result"),
+        device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> None:
     """Run the animator on a single source/driver pair."""
 

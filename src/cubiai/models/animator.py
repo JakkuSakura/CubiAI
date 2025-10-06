@@ -49,27 +49,26 @@ class UpBlock(nn.Module):
         return self.conv(self.up(x))
 
 
-class MotionEncoder(nn.Module):
-    def __init__(self, in_ch: int = 3, base_ch: int = 32, latent_dim: int = 128) -> None:
+class DescriptorEncoder(nn.Module):
+    def __init__(self, in_ch: int = 3, base_ch: int = 32, descriptor_ch: int = 64) -> None:
         super().__init__()
-        self.backbone = nn.Sequential(
-            ConvBlock(in_ch, base_ch, stride=2),
-            ConvBlock(base_ch, base_ch * 2, stride=2),
-            ConvBlock(base_ch * 2, base_ch * 4, stride=2),
-            ConvBlock(base_ch * 4, base_ch * 4, stride=2),
-        )
+        self.enc1 = ConvBlock(in_ch, base_ch, stride=2)
+        self.enc2 = ConvBlock(base_ch, base_ch * 2, stride=2)
+        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4, stride=2)
+        self.enc4 = ConvBlock(base_ch * 4, descriptor_ch, stride=2)
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.head = nn.Linear(base_ch * 4, latent_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feat = self.backbone(x)
-        pooled = self.pool(feat).flatten(1)
-        latent = self.head(pooled)
-        return latent
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x = self.enc1(x)
+        x = self.enc2(x)
+        x = self.enc3(x)
+        descriptor_map = self.enc4(x)
+        descriptor_vec = self.pool(descriptor_map).flatten(1)
+        return descriptor_map, descriptor_vec
 
 
 class ImageUNet(nn.Module):
-    def __init__(self, in_ch: int = 6, base_ch: int = 64, latent_dim: int = 128) -> None:
+    def __init__(self, in_ch: int, base_ch: int = 64, latent_dim: int = 128) -> None:
         super().__init__()
         ch = base_ch
         self.enc1 = ConvBlock(in_ch, ch)
@@ -138,12 +137,14 @@ class Animator(nn.Module):
     def __init__(
         self,
         *,
+        descriptor_ch: int = 64,
         latent_dim: int = 128,
         num_domains: int = 2,
     ) -> None:
         super().__init__()
-        self.translator = ImageUNet(in_ch=6, base_ch=64, latent_dim=latent_dim)
-        self.motion_encoder = MotionEncoder(in_ch=3, base_ch=32, latent_dim=latent_dim)
+        self.descriptor_encoder = DescriptorEncoder(in_ch=3, base_ch=32, descriptor_ch=descriptor_ch)
+        self.translator = ImageUNet(in_ch=3 + descriptor_ch, base_ch=64, latent_dim=latent_dim)
+        self.delta_proj = nn.Linear(descriptor_ch, latent_dim)
         self.domain_embed = nn.Embedding(num_domains, latent_dim)
 
     def forward(
@@ -154,29 +155,38 @@ class Animator(nn.Module):
         strength: float = 1.0,
         driver_domain: int | torch.Tensor | None = None,
     ) -> Dict[str, torch.Tensor]:
-        b = src_hr.shape[0]
-        latent = self.motion_encoder(drv_hr)
+        b, _, h, w = src_hr.shape
+
+        desc_src_map, desc_src_vec = self.descriptor_encoder(src_hr)
+        desc_drv_map, desc_drv_vec = self.descriptor_encoder(drv_hr)
+        delta_map = desc_drv_map - desc_src_map
+
+        delta_up = F.interpolate(delta_map, size=(h, w), mode="bilinear", align_corners=False)
+        latent_vec = desc_drv_vec - desc_src_vec
+        latent_vec = self.delta_proj(latent_vec)
+
         if driver_domain is not None:
             if isinstance(driver_domain, torch.Tensor):
-                domain_vec = self.domain_embed(driver_domain.to(latent.device))
+                domain_vec = self.domain_embed(driver_domain.to(latent_vec.device))
             else:
                 domain_vec = self.domain_embed(
-                    torch.full((b,), driver_domain, device=latent.device, dtype=torch.long)
+                    torch.full((b,), driver_domain, device=latent_vec.device, dtype=torch.long)
                 )
-            latent = latent + domain_vec
-        latent = latent / (latent.norm(dim=-1, keepdim=True) + 1e-6)
+            latent_vec = latent_vec + domain_vec
+        latent_vec = latent_vec / (latent_vec.norm(dim=-1, keepdim=True) + 1e-6)
 
-        translator_input = torch.cat([src_hr, drv_hr], dim=1)
-        residual = self.translator(translator_input, control=latent)
+        translator_input = torch.cat([src_hr, delta_up], dim=1)
+        residual = self.translator(translator_input, control=latent_vec)
         output = torch.tanh(src_hr + strength * residual)
+
+        desc_out_map, _ = self.descriptor_encoder(output)
 
         return {
             "output": output,
+            "descriptor_ref": desc_src_map,
+            "descriptor_drv": desc_drv_map,
+            "descriptor_out": desc_out_map,
         }
-
-
-def blur3x3(x: torch.Tensor) -> torch.Tensor:
-    return F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
 
 # -----------------------------------------------------------------------------
 # Dataset
@@ -278,14 +288,16 @@ class PassThroughTrainer:
         pred = out["output"]
 
         loss_rec = (pred - tgt).abs().mean()
-        delta_pred = pred - src
-        delta_drv = drv - src
-        blur_pred = blur3x3(delta_pred)
-        blur_drv = blur3x3(delta_drv)
-        delta_diff = blur_pred - blur_drv
+        descriptor_ref = out["descriptor_ref"]
+        descriptor_drv = out["descriptor_drv"]
+        descriptor_out = out["descriptor_out"]
 
-        loss_align = delta_diff.pow(2).mean()
-        loss_motion = total_variation(delta_diff)
+        delta_target = descriptor_drv - descriptor_ref
+        delta_output = descriptor_out - descriptor_ref
+        align_diff = delta_output - delta_target
+
+        loss_align = align_diff.pow(2).mean()
+        loss_motion = total_variation(align_diff)
 
         loss = loss_rec + cfg.lambda_align * loss_align + cfg.lambda_motion * loss_motion
 
@@ -307,7 +319,7 @@ class PassThroughTrainer:
             "l_align": float(loss_align.detach().cpu()),
             "l_motion": float(loss_motion.detach().cpu()),
             "l_id": float(loss_id.detach().cpu()),
-            "residual_mag": float(delta_pred.abs().mean().detach().cpu()),
+            "residual_mag": float((pred - src).abs().mean().detach().cpu()),
         }
 
 # -----------------------------------------------------------------------------
