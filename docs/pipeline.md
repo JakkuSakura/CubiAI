@@ -17,14 +17,14 @@ This document outlines the current motion-transfer pipeline and the upgrades pla
 2. Forward pass through the `Animator` with the static portrait and driver frame (descriptor tensors will be added here).
 3. Compute losses:
    - Reconstruction against the driver frame (`L1`).
-   - Motion-alignment via blurred residuals or descriptor deltas.
+   - Alignment via blurred residual comparisons to the driver (to be replaced with descriptor deltas).
    - Identity consistency by driving the portrait with itself at reduced strength.
-   - Regularisation (total variation on residuals, gradient clipping).
+   - Regularisation (total variation on alignment residuals, gradient clipping).
 4. Optimise with AdamW; metrics are logged every 50 steps.
 
 ## 4. Checkpointing & Outputs
 - Model weights are stored under the training workdir (default `pass_through.pt`, slated for renaming).
-- Metrics dictionary includes reconstruction, colour alignment, motion smoothness, and residual magnitude.
+- Metrics dictionary includes reconstruction, alignment loss, motion smoothness, and residual magnitude.
 - Planned additions: descriptor alignment scores, Fréchet-style metrics, preview GIF renders.
 
 ## 5. Inference

@@ -22,7 +22,7 @@ def train(
     batch: int = typer.Option(1, help="Batch size"),
     epochs: int = typer.Option(1, help="Epochs (upper bound if dataset small)"),
     lr: float = typer.Option(2e-4, help="Learning rate"),
-    lambda_color: float = typer.Option(0.3, help="Weight for color preservation"),
+    lambda_align: float = typer.Option(0.3, help="Weight for driver-aligned motion"),
     lambda_motion: float = typer.Option(0.1, help="Weight for motion magnitude penalty"),
     device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu", help="Torch device"),
     num_workers: int = typer.Option(2, help="DataLoader workers"),
@@ -33,7 +33,7 @@ def train(
     model = Animator()
     trainer = PassThroughTrainer(model, lr=lr, device=device)
     cfg = TrainerConfig(
-        lambda_color=lambda_color,
+        lambda_align=lambda_align,
         lambda_motion=lambda_motion,
     )
 

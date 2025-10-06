@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
 from PIL.Image import Resampling
 from torch.utils.data import Dataset, DataLoader
@@ -173,6 +174,10 @@ class Animator(nn.Module):
             "output": output,
         }
 
+
+def blur3x3(x: torch.Tensor) -> torch.Tensor:
+    return F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
+
 # -----------------------------------------------------------------------------
 # Dataset
 # -----------------------------------------------------------------------------
@@ -249,7 +254,7 @@ class PortraitVideoDataset(Dataset):
 
 @dataclass(slots=True)
 class TrainerConfig:
-    lambda_color: float = 0.3
+    lambda_align: float = 0.3
     lambda_motion: float = 0.1
     lambda_identity: float = 0.1
     clip_grad: float = 1.0
@@ -273,11 +278,16 @@ class PassThroughTrainer:
         pred = out["output"]
 
         loss_rec = (pred - tgt).abs().mean()
-        residual = pred - src  # residual encodes per-pixel deviation from the source
-        loss_color = residual.pow(2).mean()
-        loss_motion = total_variation(residual)  # penalise spatially large or abrupt movements
+        delta_pred = pred - src
+        delta_drv = drv - src
+        blur_pred = blur3x3(delta_pred)
+        blur_drv = blur3x3(delta_drv)
+        delta_diff = blur_pred - blur_drv
 
-        loss = loss_rec + cfg.lambda_color * loss_color + cfg.lambda_motion * loss_motion
+        loss_align = delta_diff.pow(2).mean()
+        loss_motion = total_variation(delta_diff)
+
+        loss = loss_rec + cfg.lambda_align * loss_align + cfg.lambda_motion * loss_motion
 
         if cfg.lambda_identity > 0:
             out_id = self.model(src, src, strength=0.2, driver_domain=domain)
@@ -294,10 +304,10 @@ class PassThroughTrainer:
         return {
             "loss": float(loss.detach().cpu()),
             "l_rec": float(loss_rec.detach().cpu()),
-            "l_color": float(loss_color.detach().cpu()),
+            "l_align": float(loss_align.detach().cpu()),
             "l_motion": float(loss_motion.detach().cpu()),
             "l_id": float(loss_id.detach().cpu()),
-            "residual_mag": float(residual.abs().mean().detach().cpu()),
+            "residual_mag": float(delta_pred.abs().mean().detach().cpu()),
         }
 
 # -----------------------------------------------------------------------------

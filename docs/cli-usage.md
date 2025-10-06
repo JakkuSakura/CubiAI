@@ -14,7 +14,7 @@ Train the Animator on a portrait/driver dataset.
 ```bash
 uv run cubiai model train ./dataset ./runs/animator \
     --size 1024 --steps 2000 --batch 1 \
-    --lambda-color 0.3 --lambda-motion 0.1 \
+    --lambda-align 0.3 --lambda-motion 0.1 \
     --device cuda
 ```
 
@@ -28,7 +28,7 @@ uv run cubiai model train ./dataset ./runs/animator \
 - `--epochs`: Hard upper bound on dataset passes.
 - `--batch`: Mini-batch size (defaults to `1`).
 - `--lr`: Learning rate for AdamW.
-- `--lambda-color`, `--lambda-motion`: Loss weights controlling colour preservation and motion smoothness trade-offs.
+- `--lambda-align`, `--lambda-motion`: Loss weights controlling driver alignment and motion smoothness trade-offs.
 - `--device`: Torch device string (`cuda`, `mps`, `cpu`).
 - `--num-workers`: Dataloader workers.
 

@@ -49,7 +49,7 @@ config/             Example YAML configs for training and experiments
    ```bash
    uv run cubiai model train ./dataset ./runs/animator \
        --size 1024 --steps 2000 --batch 1 \
-       --lambda-color 0.3 --lambda-motion 0.1
+       --lambda-align 0.3 --lambda-motion 0.1
    ```
 3. Run inference on a portrait/driver pair:
    ```bash

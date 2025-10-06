@@ -16,7 +16,7 @@ CubiAI is evolving into a few-shot motion transfer system for Live2D characters.
 3. **Animator**
    - Residual U-Net conditioned via FiLM/AdaIN on a portrait appearance embedding.
    - Consumes the static portrait, driver frame, and (soon) descriptor tensors to predict the next stylised frame directly at target resolution.
-   - Emits only the final RGB image—motion and colour penalties are inferred post hoc for training losses.
+   - Emits only the final RGB image—motion-alignment penalties are computed post hoc for training losses.
 
 4. **Training Orchestrator**
    - `PassThroughTrainer` (to be renamed) manages optimiser state, gradient clipping, and logging.
