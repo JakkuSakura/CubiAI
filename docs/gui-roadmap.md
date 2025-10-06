@@ -1,53 +1,34 @@
-# GUI Roadmap (Phase Two)
+# GUI Roadmap
 
-The PySide GUI will build upon the CLI core to deliver an artist-friendly experience. This roadmap describes planned features, UX milestones, and technical considerations.
+The GUI concept shifts from segmentation review toward motion-transfer experimentation. The goal is a lightweight PySide6 application that helps visualise motion descriptors, compare generated frames, and manage experiments without leaving the desktop.
 
 ## Milestones
+1. **Prototype Viewer**
+   - Load a portrait, driver clip, and generated outputs side-by-side.
+   - Scrub through timelines with overlayed keypoints or descriptor heatmaps.
+   - Display training metrics for the selected checkpoint.
 
-1. **Foundational GUI Shell**
-   - Project launcher with configuration selection and recent workspaces.
-   - Embedded console view mirroring CLI logs.
-   - Background worker infrastructure for long-running tasks.
+2. **Experiment Manager**
+   - Launch training jobs with preset configs, monitor progress, and archive results.
+   - Tag runs with descriptor variants, loss weights, and dataset subsets for easy comparison.
 
-2. **Segmentation Review Tools**
-   - Layer preview canvas with toggles for masks and RGBA outputs.
-   - Brush-based touch-up tools that feed updated masks back into the pipeline.
-   - Confidence heatmaps overlay for quick QA.
+3. **Descriptor Inspector**
+   - Visualise discovered keypoints, attention maps, or canonical coordinates directly on frames.
+   - Provide before/after toggles to spot colour drift or structural artefacts.
 
-3. **Rig Visualization**
-   - Hierarchical tree for parts and deformers.
-   - Parameter curve widgets for tweaking idle/breathing motions.
-   - Live preview panel using Cubism SDK for Python or Qt WebEngine integration with the Cubism Viewer.
+4. **Batch Preview & Export**
+   - Queue multiple inference runs (different portraits or drivers) and export GIF/MP4 previews.
+   - Generate diagnostic reports summarising motion alignment scores once the evaluation suite lands.
 
-4. **Export & Validation Wizards**
-   - Guided workflow to review diagnostics, adjust export settings, and bundle outputs.
-   - Validation checklist ensuring Cubism import readiness.
+## Technical Notes
+- **PySide6/Qt** remains the UI toolkit.
+- Worker threads (QtConcurrent/QThreadPool) will run inference or descriptor extraction asynchronously.
+- Rendering overlays may use Qt’s `QPainter` or a small OpenGL canvas for performance.
+- IPC hooks (e.g., ZeroMQ or WebSockets) can stream metrics from long-running training processes.
 
-5. **Quality-of-Life Enhancements**
-   - Undo/redo stack for manual edits.
-   - Asset library for commonly reused textures or rig templates.
-   - Plugin marketplace integration (e.g., install new segmentation providers).
+## Design Principles
+- Keep the GUI optional; the CLI should remain the single source of truth.
+- Optimise for quick qualitative review—artists should preview motion transfers in seconds.
+- Make experiment provenance explicit: show commit, configuration hash, and dataset fingerprint.
 
-## Technical Stack
-- **PySide6** for Qt-based UI components.
-- **QtConcurrent/QThreadPool** for asynchronous processing.
-- **qasync** bridge for integrating asyncio-based pipeline steps.
-- **matplotlib / QtGraph** for plotting diagnostics.
-- **OpenGL** surface or Cubism SDK viewer for real-time preview.
-
-## Integration with CLI Core
-- The GUI imports the same pipeline modules used by the CLI to avoid divergence.
-- Workspace events are emitted through a message bus (e.g., `asyncio.Queue` or `pydantic` event models).
-- Configuration edits in the GUI persist back to YAML configuration files per project.
-
-## UX Principles
-- Provide safe defaults while allowing experts to drill into underlying parameters.
-- Surface model provenance and licensing within the UI when third-party assets are used.
-- Support keyboard-driven workflows to accommodate power users.
-
-## Testing Strategy
-- Unit tests for view models and service layer.
-- Screenshot tests for key dialogs using Qt test utilities.
-- End-to-end smoke tests scripted with `pytest-qt`.
-
-This roadmap will be refined after the CLI core stabilizes and we collect feedback from early adopters.
+This roadmap will adjust as the descriptor stack matures and we gather feedback on which visualisations are most useful for diagnosing motion transfer quality.

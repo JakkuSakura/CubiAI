@@ -1,126 +1,82 @@
 # CubiAI
 
-CubiAI is a two-phase project that converts a single illustration into a fully rigged Live2D asset. Phase one delivers a Typer-based CLI that automates image layer extraction, PSD assembly, Live2D asset packaging, and lightweight rigging. Phase two adds a PySide-powered GUI that builds on the same pipeline for interactive workflows.
+CubiAI explores few-shot motion transfer for Live2D-style portraits. The current focus is learning how stylised characters should move from a small collection of reference clips, then retargeting real-face (or parser-produced) motion to entirely new characters at native resolution.
 
-## Why CubiAI?
-- **AI-assisted layer extraction** – Run SAM-HQ locally via `transformers`/`torch` (with optional hosted SAM or SLIC fallbacks) to produce semantically meaningful layers straight from a PNG.
-- **Production-aware export** – Produce layered PSDs for revision workflows and assemble a Cubism-friendly project structure with textures, physics, and parameter presets.
-- **Layer archive** – Save every extracted layer as a transparent PNG (`png/001.png`, `png/002.png`, …) for quick reviews or manual edits.
-- **Rigging automation (optional)** – When enabled, drive an OpenAI-compatible LLM to draft rig parameters, then delegate moc3 creation to a Live2D builder command so the asset can load directly in Cubism.
-- **Extensible architecture** – Swap AI providers, customize rig templates, and extend the pipeline for bespoke character styles.
+## Project Goals
+- **Cross-domain motion descriptors** – Extract or learn canonical facial motion cues that work for anime, real portraits, and potential face-parsing maps without dense labels.
+- **Appearance-conditioned animator** – Generate high-resolution Live2D frames by conditioning on a static portrait while following motion signals, keeping colour fidelity and structural detail.
+- **Tiny-data viability** – Operate with roughly a dozen Live2D clips plus optional scripted calibration sweeps, using self-supervised keypoints, augmentation, and lightweight adapters.
+- **Practical tooling** – Provide CLI workflows for training, evaluation, and future face-to-Live2D inference, with documentation on data layout and configuration.
 
-## Project Phases
-1. **Phase One – CLI foundation**
-   - Typer CLI with subcommands for processing assets, inspecting outputs, and maintaining a single YAML configuration.
-   - Local workspace management via uv, structured logging, and reproducible processing pipelines.
-   - Deterministic configuration files describing model choices, layer schemas, and rig presets.
-2. **Phase Two – GUI experience**
-   - PySide-based desktop application that wraps the CLI core.
-   - Visual previews of layer segmentation, editable rig graphs, and Live2D project validation.
-   - Background task orchestration, history management, and export wizards.
+## Current Capabilities
+- Portrait/video dataset loader that expects each portrait alongside a folder of driver frames.
+- `Animator` model that applies motion to a still portrait via a residual U-Net with latent FiLM conditioning.
+- Training loop with reconstruction, motion-alignment, and identity consistency losses designed to discourage colour drift while rewarding driver-aligned movement.
+- Typer-based CLI (`cubiai model train` / `cubiai model infer`) for quick experimentation.
+
+## Roadmap Highlights
+1. **Canonical motion extractor** – Train an unsupervised keypoint or semantic map network on available Live2D clips and map human-face landmarks into the same space via a small adapter.
+2. **Descriptor-conditioned animator** – Integrate descriptor tensors directly so the generator reacts to motion rather than raw RGB differences.
+3. **Few-shot character adaptation** – Explore appearance encoders and fast fine-tuning so brand-new Live2D characters can borrow learned motion without full retraining.
+4. **Evaluation tooling** – Add motion-alignment metrics, colour-drift scores, and qualitative preview scripts for new drivers/characters.
 
 ## Repository Layout
 ```
-README.md           Project overview
-LICENSE             License information
-docs/               Extended documentation (architecture, models, usage, roadmap)
-```
-Additional directories for source code, tests, and assets will be introduced as implementation progresses.
-## Data
-This project expects a raw portrait dataset under `data/raw/danbooru2019/`.
-
-Danbooru2023 is huge (~8 TB). For experimentation you can fetch a single shard,
-for example `original/data-0000.tar`.
-https://huggingface.co/datasets/nyanko7/danbooru2023/resolve/main/original/data-0000.tar
-```shell
-tar xf data-0000.tar -C data/raw/danbooru2019/
+README.md           Project overview and roadmap
+src/                Core library (models, CLI commands, data loader)
+docs/               Architecture notes, pipeline plans, model references
+config/             Example YAML configs for training and experiments
 ```
 
-## Getting Started
-CubiAI relies on the [uv](https://github.com/astral-sh/uv) Python toolchain plus external AI services. Configure credentials first:
+## Data Expectations
+- Place portrait/driver pairs under a dataset root:
+  ```
+  dataset/
+    alice.png
+    alice_video/00000000.png
+    alice_video/00000001.png
+    ...
+  ```
+- Portrait filenames must match the driver directory stem (`<name>_video`).
+- Additional characters can be added the same way; short scripted sweeps are encouraged to widen motion coverage.
 
-```bash
-export OPENAI_API_KEY="sk-..."       # OpenAI-compatible token for rigging LLM calls
-export CUBISM_CLI="/Applications/CubismEditor.app/Contents/MacOS/cubism-cli"  # Optional (needed only if rigging is enabled)
-# optional overrides for SAM-HQ
-# export CUBIAI_SAM_HQ_MODEL=syscv-community/sam-hq-vit-base
-# export CUBIAI_SAM_HQ_DEVICE=cuda
+## Quick Start
+1. Install dependencies with [uv](https://github.com/astral-sh/uv):
+   ```bash
+   uv sync
+   ```
+2. Train the animator:
+   ```bash
+   uv run cubiai model train ./dataset ./runs/animator \
+       --size 1024 --steps 2000 --batch 1 \
+       --lambda-color 0.3 --lambda-motion 0.1
+   ```
+3. Run inference on a portrait/driver pair:
+   ```bash
+   uv run cubiai model infer portrait.png driver.png \
+       --checkpoint ./runs/animator/pass_through.pt \
+       --output ./outputs/preview.png
+   ```
 
-uv sync
-uv run cubiai --help
-```
+The CLI saves intermediate metrics every 50 steps and writes the trained weights to the specified `workdir`.
 
-SAM-HQ segmentation runs locally using `transformers` + `torch`. The first execution downloads the model weights into your Hugging Face cache; subsequent runs work offline.
-
-Invoke the pipeline:
-
-```bash
-uv run cubiai process ./input/character.png \
-    --config config/cubiai.yaml \
-    --output-dir ./build/character
-```
-
-### Train the pass-through animator
-
-Organise your dataset as:
-
-```
-<dataset_root>/
-  alice.png              # portrait
-  alice_video/00000000.png  # driver frames
-  alice_video/00000001.png
-  ...
-```
-
-Each portrait image needs a sibling folder named `<stem>_video` containing the driver frames. Then train with:
-
-```bash
-uv sync
-uv run cubiai model train ./dataset_root ./runs/pass_through     --size 1024 --low-res 256 --batch 1 --steps 2000
-```
-
-After training, run the animator on a single source/driver pair:
-
-```bash
-uv run cubiai model infer portrait.png driver_frame.png     --checkpoint ./runs/pass_through/pass_through.pt     --output ./outputs/animated.png
-```
-
-You can expose the `--strength`, `--low-res`, and image `--size` flags to control deformation intensity and flow resolution.
-
-> **Hard failure when misconfigured:** the rigging stage is disabled by default; enable it by setting `rigging.enabled: true` and supplying both an LLM key and a `rigging.builder.command`. The segmentation backend loads SAM-HQ locally via `transformers`+`torch`; the first run downloads weights from Hugging Face unless they are already cached.
-
-Outputs include:
-- `layers.psd` built from the PNG stack.
-- Numbered transparent PNGs for each layer under `png/`.
-- Optional Live2D project structure (textures, `model3.json`, moc3) when rigging is enabled and a builder command is provided.
-
-## Live2D Builder Integration
-- Edit `config/cubiai.yaml` and fill in `rigging.builder.command` with the Live2D automation tool you rely on (Cubism CLI, proprietary pipeline, etc.).
-- Command arguments may use `{PSD_PATH}`, `{RIG_JSON}`, `{WORKSPACE}`, and `{OUTPUT_DIR}` placeholders, which are resolved before execution.
-- The rigging stage confirms `model.moc3` exists after the command finishes; absence raises a `PipelineStageError`.
-
-Consult `docs/cli-usage.md` for end-to-end CLI examples and additional troubleshooting tips.
-
-## Configuration
-- All runtime settings reside in `config/cubiai.yaml`. Duplicate this file for project-specific presets and point the CLI at your variant with `--config`.
-- Key sections include `segmentation` (SAM-HQ parameters), `annotation.strategy` + `annotation.cluster` (semi-supervised model paths and thresholds), `annotation.llm` (Codex fallback settings), `rigging` (builder command), and `export` (PSD/Live2D options).
+## Key Concepts
+- **Motion Descriptor Alignment** – Design or learn a representation that captures head pose and expression changes uniformly across domains (anime, real, parser output). Future releases will replace raw RGB conditioning with these descriptors.
+- **Appearance Conditioning** – Encode the static portrait to modulate generator layers (FiLM/AdaIN) so the animator respects each character’s structure and style.
+- **Motion-Regularised Losses** – Compare predicted motion against driver motion in a blur-tolerant space and regularise with total variation to avoid scattered artefacts.
+- **Limited Data Strategy** – Combine unsupervised keypoint discovery, heavy augmentation, and optional synthetic rig sweeps to overcome scarce labelled anime data.
 
 ## Documentation
-The `docs/` directory captures the design decisions behind CubiAI:
-- `architecture.md` – System boundaries, data flow, and module responsibilities.
-- `pipeline.md` – Step-by-step processing pipeline describing each transformation stage.
-- `ai-models.md` – Supported AI/LLM providers, required assets, and configuration knobs.
-- `gui-roadmap.md` – Phase two planning and UX considerations.
-- `cli-usage.md` – CLI usage guide, configuration samples, and troubleshooting tips.
-
-These documents will evolve alongside the implementation. Start with `docs/architecture.md` for a deep dive into the pipeline.
+- `docs/architecture.md` – Updated component diagram reflecting motion descriptor extraction, adapters, and the animator.
+- `docs/pipeline.md` – Training/inference pipeline and planned extensions.
+- `docs/ai-models.md` – Notes on unsupervised keypoint models, descriptor adapters, and candidate feature backbones.
+- Additional documents cover CLI usage and GUI roadmap placeholders from earlier phases.
 
 ## Contributing
-1. Install uv and sync dependencies.
-2. Run formatters and tests before submitting changes (`uv run hatch fmt`, `uv run hatch test`, etc. – exact commands TBD).
-3. Document new commands, configuration flags, or model integrations.
-
-See `docs/pipeline.md` for development conventions, and `docs/ai-models.md` for detailed service configuration and troubleshooting expectations.
+Contributions are welcome—from motion descriptor research to tooling improvements.
+1. Use uv for dependency management (`uv sync`).
+2. Open issues for proposed architectural changes or new training scripts.
+3. Document new configuration flags and update the docs accordingly.
 
 ## License
 CubiAI is released under the MIT License (see `LICENSE`).

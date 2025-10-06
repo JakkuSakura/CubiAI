@@ -1,82 +1,53 @@
-# CubiAI Architecture
+# Architecture Overview
 
-CubiAI automates the journey from a single illustration to a Live2D-ready asset. The solution is structured as a series of modular services orchestrated through a configurable pipeline. This document captures the conceptual architecture and engineering priorities for both phases of the project.
+CubiAI is evolving into a few-shot motion transfer system for Live2D characters. The solution is organised into modular services so that motion descriptors, adapters, and image generators can be upgraded independently.
 
-## High-Level Components
+## Component Map
 
-1. **CLI / GUI Front-Ends**
-   - Phase one exposes functionality through a Typer CLI (`cubiai`).
-   - Phase two introduces a PySide GUI that wraps the same application services and provides visualization.
-2. **Application Core**
-   - Pipeline coordinator that orchestrates discrete processing stages.
-   - Dependency injection container for AI providers, exporters, and rig generators.
-   - Configuration loader that resolves model checkpoints, thresholds, and rig templates from YAML files.
-3. **AI Processing Services**
-   - **Segmentation Service**: Splits the base illustration into semantic layers. The default path loads SAM-HQ locally through `transformers`/`torch`, while hosted SAM and SLIC remain as alternative backends.
-   - **Detail Refinement**: Applies matting and edge refinement to remove halos and maintain alpha fidelity.
-   - **Post-processing**: Normalizes colors, fills gaps, and enforces consistent canvas sizes across layers.
-4. **Asset Exporters**
-   - **Layered PSD Exporter**: Collects individually masked layers and renders them as a layered PSD with organized groups for manual review or manual editing.
-   - **PNG Exporter**: Writes every processed layer as a transparent PNG for quick inspection or hand edits.
-   - **Live2D Exporter**: Packages textures, meshes, physics, motions, and metadata into a Cubism project layout.
-5. **Rigging Engine (Optional)**
-   - When enabled, sends layer metadata to an OpenAI-compatible LLM that proposes parts, parameters, deformers, and motion stubs.
-   - Delegates moc3 creation to an external builder command (e.g., Cubism SDK automation). Builder stdout/stderr are captured for diagnostics.
-   - Produces `model3.json`, pose/physics JSON, and optional `.motion3.json` animations, skipping any artefact the builder already provided.
-6. **Storage and Asset Management**
-   - Workspace abstraction to manage input assets, intermediate caches, and final outputs.
-   - Persistence for pipeline checkpoints, enabling resumable processing and reproducibility.
-7. **Observability**
-   - Structured logging, progress events, API payload tracing, and captured stdout/stderr from the Live2D builder.
+1. **Data Layer**
+   - Portrait/video dataset loader (`PortraitVideoDataset`) handles static character art and driver clips.
+   - Future drivers (face parser outputs, human video) will be normalised through shared preprocessing utilities.
+
+2. **Motion Descriptor Stack (planned)**
+   - **Unsupervised keypoint extractor** discovers canonical motion landmarks from Live2D clips with minimal labels.
+   - **Domain adapters** map external drivers (human faces, parser maps) into the same descriptor space using lightweight MLP/CNN heads.
+   - **Descriptor buffers** cache trajectories for training the animator without repeatedly re-encoding video frames.
+
+3. **Animator**
+   - Residual U-Net conditioned via FiLM/AdaIN on a portrait appearance embedding.
+   - Consumes the static portrait, driver frame, and (soon) descriptor tensors to predict the next stylised frame directly at target resolution.
+   - Emits only the final RGB image—motion and colour penalties are inferred post hoc for training losses.
+
+4. **Training Orchestrator**
+   - `PassThroughTrainer` (to be renamed) manages optimiser state, gradient clipping, and logging.
+   - Losses combine reconstruction, driver-aligned motion regularisation, and identity preservation. Planned upgrades will swap raw RGB terms for descriptor-based comparisons.
+
+5. **CLI Interface**
+   - Typer commands expose training/inference (`cubiai model train`, `cubiai model infer`).
+   - Future commands will ingest descriptor caches, run evaluation suites, and export preview videos.
+
+6. **Evaluation & Tooling (roadmap)**
+   - Metric scripts to compute descriptor alignment, colour drift, and motion smoothness.
+   - Visualisation utilities for discovered keypoints and generated motion traces.
 
 ## Data Flow
 
 ```text
-input image → preprocessing → segmentation & matting → layer post-processing
-            → PSD generation → Live2D asset compilation → rig validation
+portrait + driver clip → dataset loader → motion descriptor extraction (planned) → animator training → checkpoints & metrics
+                                                      ↓
+                                        inference portraits / drivers → generated Live2D frames
 ```
 
-Each stage produces artifacts under a run-specific workspace directory (e.g., `build/<timestamp>/`). The coordinator enforces a deterministic order, handles retries, and records metadata about model versions and configuration overrides.
+The architecture emphasises a clean separation between motion understanding and image synthesis so each can evolve with new research.
 
-## Configuration Model
+## Extensibility
+- **Descriptor plugins** – swap in alternate keypoint/feature extractors by conforming to a simple interface (tensor out, metadata on coverage/confidence).
+- **Appearance encoders** – experiment with different image backbones (ConvNeXt, ViT) for portrait embeddings without touching the motion modules.
+- **Training recipes** – register new loss functions or schedulers via configuration to evaluate ideas like diffusion-based refinement or perceptual metrics.
 
-- **Configuration files (`config/*.yaml`)** describe model backends, hyper-parameters, and rig templates. Example keys:
-  - `segmentation.backend`: `sam-hq-local` (default), `huggingface-sam`, or `slic`.
-  - `segmentation.sam_hq_local_*`: local SAM-HQ model identifier, device, and score thresholds.
-  - `rigging.strategy`: `llm` or `heuristic` along with LLM model ID and API key environment variable.
-  - `rigging.builder.command`: command template used to invoke a Live2D moc3 builder.
-  - `export.live2d.texture_size`: output atlas size.
-- The application core loads the configuration file, hydrates services, and validates dependencies (model weights, API keys).
+## Current Gaps
+- Motion descriptors are still derived implicitly from RGB differences; the descriptor module is the next major milestone.
+- No automated evaluation of motion alignment yet; manual inspection is required.
+- Inference path does not yet accept external face videos—adapters need to be trained.
 
-## Extensibility Strategy
-
-- **Plugin Interfaces**: Abstract base classes define the contracts for segmentation providers, PSD exporters, and rig pipelines.
-- **Entry Points**: Additional providers can be registered via `pyproject.toml` entry points, enabling third-party contributions.
-- **Configuration-driven Behavior**: Most runtime decisions derive from YAML configuration files, minimizing code changes for experimentation.
-- **Sandboxed Execution**: Potentially expensive stages (e.g., AI inference) can run in isolated subprocesses or via gRPC workers.
-
-## Error Handling & Validation
-
-- Validation at the start of each stage ensures required inputs are present.
-- Stages emit human-readable diagnostics stored alongside outputs (`diagnostics.json`).
-- The rigging step performs compatibility checks with Live2D Cubism (texture sizes, polygon counts).
-
-## Phase Two Considerations
-
-- The GUI will share the application core via a service layer. UI components subscribe to progress events and render previews in Qt widgets.
-- Long-running tasks will execute in worker threads/processes with cancellation support.
-- User adjustments (e.g., mask cleanup) feed back into the pipeline for reprocessing.
-
-## Security & Privacy
-
-- Configuration files can declare remote inference backends (e.g., private API endpoints). Secrets are loaded from environment variables or `.env` files and never stored in run artifacts.
-- The CLI supports `--offline` mode to disable remote providers entirely.
-
-## Next Steps
-
-1. Implement the pipeline coordinator and default segmentation backend.
-2. Define configuration schemas and validation logic.
-3. Flesh out rig templates and ensure Live2D exports meet Cubism import requirements.
-4. Instrument logs and diagnostics for troubleshooting.
-
-This architecture will evolve as we validate performance, accuracy, and usability goals. Feedback and contributions are welcome.
+These notes will continue to evolve as the motion descriptor stack and evaluation tooling come online.
