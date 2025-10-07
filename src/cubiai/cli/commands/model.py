@@ -60,7 +60,7 @@ def train(
 
     start_time = perf_counter()
     progress = tqdm(range(epochs), desc="epochs")
-    for _ in tqdm(range(epochs), desc="epochs"):
+    for _ in progress:
         for batch_data in dataloader:
             metrics = trainer.training_step(batch_data, cfg)
 
