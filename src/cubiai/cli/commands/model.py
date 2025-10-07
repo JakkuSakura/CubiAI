@@ -1,4 +1,4 @@
-"""CLI commands for the pass-through animator model."""
+"""CLI commands for the animator model."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from ...models.animator import Animator, PassThroughTrainer, TrainerConfig, create_dataloader
 
-app = typer.Typer(help="Commands for training and evaluating the pass-through animator.")
+app = typer.Typer(help="Commands for training and evaluating the animator.")
 
 
 @app.command()
@@ -30,7 +30,7 @@ def train(
         device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu", help="Torch device"),
         num_workers: int = typer.Option(2, help="DataLoader workers"),
 ) -> None:
-    """Train the pass-through animator on the given dataset."""
+    """Train the animator on the given dataset."""
 
     dataloader = create_dataloader(data_root, size=size, batch_size=batch, num_workers=num_workers)
     model = Animator()
@@ -77,7 +77,7 @@ def train(
 
     # Save checkpoint and quick preview
     workdir.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), workdir / "pass_through.pt")
+    torch.save(model.state_dict(), workdir / "animator.pt")
 
     sample = next(iter(dataloader))
     if not isinstance(sample, (list, tuple)):
@@ -98,7 +98,7 @@ def train(
     else:
         domain_id = 0
     with torch.no_grad():
-        out = model(src, drv, strength=0.8, driver_domain=domain_id)
+        out = model(src, drv, strength=1.0, driver_domain=domain_id)
         result = out["output"].clamp(-1, 1)
         result = ((result[0].cpu() + 1.0) * 0.5).permute(1, 2, 0).numpy()
         from PIL import Image
@@ -111,7 +111,7 @@ def train(
 def infer(
         source: Path = typer.Argument(..., help="Path to source image"),
         driver: Path = typer.Argument(..., help="Path to driver image"),
-        checkpoint: Path = typer.Option(Path("runs/pass_through/pass_through.pt"), help="Model weights"),
+        checkpoint: Path = typer.Option(Path("runs/animator/animator.pt"), help="Model weights"),
         size: int = typer.Option(1024, help="Resize/crop size"),
         strength: float = typer.Option(1.0, help="Deformation strength"),
         driver_domain: int = typer.Option(0, help="Driver domain id (0=default, 1=real, etc.)"),

@@ -129,7 +129,7 @@ class ImageUNet(nn.Module):
         if control is not None:
             d1 = self._apply_film(d1, self.film1(control), d1.shape[1])
 
-        residual = torch.tanh(self.rgb_head(d1))
+        residual = self.rgb_head(d1)
         return residual
 
 
@@ -177,7 +177,7 @@ class Animator(nn.Module):
 
         translator_input = torch.cat([src_hr, delta_up], dim=1)
         residual = self.translator(translator_input, control=latent_vec)
-        output = torch.tanh(src_hr + strength * residual)
+        output = (src_hr + strength * residual).clamp(-1.0, 1.0)
 
         desc_out_map, _ = self.descriptor_encoder(output)
 

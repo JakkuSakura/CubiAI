@@ -23,7 +23,7 @@ This document outlines the current motion-transfer pipeline and the upgrades pla
 4. Optimise with AdamW; metrics are logged every 50 steps.
 
 ## 4. Checkpointing & Outputs
-- Model weights are stored under the training workdir (default `pass_through.pt`, slated for renaming).
+- Model weights are stored under the training workdir (default `animator.pt`).
 - Metrics dictionary includes reconstruction, alignment loss, motion smoothness, and residual magnitude.
 - Planned additions: descriptor alignment scores, Fréchet-style metrics, preview GIF renders.
 

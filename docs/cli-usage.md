@@ -32,14 +32,14 @@ uv run cubiai model train ./dataset ./runs/animator \
 - `--device`: Torch device string (`cuda`, `mps`, `cpu`).
 - `--num-workers`: Dataloader workers.
 
-Training prints metrics every 50 steps and saves `pass_through.pt` (to be renamed) plus a preview render under the workdir.
+Training prints metrics every 50 steps and saves `animator.pt` plus a preview render under the workdir.
 
 ## `cubiai model infer`
 Render a single portrait/driver pair using a saved checkpoint.
 
 ```bash
 uv run cubiai model infer portrait.png driver.png \
-    --checkpoint ./runs/animator/pass_through.pt \
+    --checkpoint ./runs/animator/animator.pt \
     --output ./outputs/preview.png \
     --strength 0.8 --size 1024
 ```

@@ -54,7 +54,7 @@ config/             Example YAML configs for training and experiments
 3. Run inference on a portrait/driver pair:
    ```bash
    uv run cubiai model infer portrait.png driver.png \
-       --checkpoint ./runs/animator/pass_through.pt \
+       --checkpoint ./runs/animator/animator.pt \
        --output ./outputs/preview.png
    ```
 
