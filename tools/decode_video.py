@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
 """Decode a video into the dataset layout expected by PortraitVideoDataset.
 
-This script extracts all frames of a video using ``ffmpeg`` into a directory
-named ``{name}_video`` and saves the first frame as ``{name}.png``. It ensures
-the directory structure matches what ``PortraitVideoDataset`` expects.
+This Typer-powered CLI extracts video frames with ``ffmpeg`` into ``{name}_video``
+and saves the first frame as ``{name}.png`` under the chosen dataset root.
 """
 
 from __future__ import annotations
 
-import argparse
 import shutil
 import subprocess
-import sys
 from pathlib import Path
+
+import typer
+
+
+app = typer.Typer(help="Decode a video into portrait + frame directory pairs.", add_completion=False)
+
+
+def abort(message: str) -> None:
+    """Exit the CLI early with an error message."""
+
+    typer.secho(f"error: {message}", fg=typer.colors.RED, err=True)
+    raise typer.Exit(code=1)
 
 
 def slugify(stem: str) -> str:
@@ -25,18 +34,16 @@ def slugify(stem: str) -> str:
 
 def ensure_ffmpeg() -> None:
     if shutil.which("ffmpeg") is None:
-        print("error: ffmpeg not found in PATH", file=sys.stderr)
-        sys.exit(1)
+        abort("ffmpeg not found in PATH")
 
 
 def run_ffmpeg(args: list[str]) -> None:
     completed = subprocess.run(args, check=False)
     if completed.returncode != 0:
-        print("error: ffmpeg command failed", file=sys.stderr)
-        sys.exit(completed.returncode)
+        abort("ffmpeg command failed")
 
 
-def decode_video(video_path: Path, dataset_root: Path, *, name: str, overwrite: bool) -> None:
+def decode_video(video_path: Path, dataset_root: Path, *, name: str, overwrite: bool) -> Path:
     ensure_ffmpeg()
 
     dataset_root.mkdir(parents=True, exist_ok=True)
@@ -46,82 +53,67 @@ def decode_video(video_path: Path, dataset_root: Path, *, name: str, overwrite: 
 
     if frames_dir.exists():
         if not overwrite:
-            print(f"error: {frames_dir} already exists (use --overwrite to replace)", file=sys.stderr)
-            sys.exit(1)
+            abort(f"{frames_dir} already exists (use --overwrite to replace)")
         if not frames_dir.is_dir():
-            print(f"error: {frames_dir} exists but is not a directory", file=sys.stderr)
-            sys.exit(1)
+            abort(f"{frames_dir} exists but is not a directory")
         shutil.rmtree(frames_dir)
 
     if portrait_path.exists():
         if not overwrite:
-            print(f"error: {portrait_path} already exists (use --overwrite to replace)", file=sys.stderr)
-            sys.exit(1)
+            abort(f"{portrait_path} already exists (use --overwrite to replace)")
         portrait_path.unlink()
 
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    # Extract all frames to the frames directory.
-    run_ffmpeg([
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(video_path),
-        "-vsync",
-        "0",
-        "-start_number",
-        "1",
-        str(frames_dir / "%08d.png"),
-    ])
+    run_ffmpeg(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(video_path),
+            "-vsync",
+            "0",
+            "-start_number",
+            "1",
+            str(frames_dir / "%08d.png"),
+        ]
+    )
 
     frames = sorted(frames_dir.glob("*.png"))
     if not frames:
-        print("error: ffmpeg did not produce any PNG frames", file=sys.stderr)
-        sys.exit(1)
+        abort("ffmpeg did not produce any PNG frames")
 
     first_frame = frames[0]
     shutil.copy(first_frame, portrait_path)
 
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("video", type=Path, help="Input video file")
-    parser.add_argument(
-        "dataset_root",
-        type=Path,
-        help="Destination dataset directory (e.g. data/dataset_1)",
-    )
-    parser.add_argument(
-        "--name",
-        type=str,
-        default=None,
-        help="Base name for the dataset entry (defaults to video stem)",
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Allow replacing existing frames directory and portrait image",
-    )
-    return parser.parse_args(argv)
+    return frames_dir
 
 
-def main(argv: list[str] | None = None) -> None:
-    opts = parse_args(argv)
+@app.command()
+def decode(
+    video: Path = typer.Argument(..., help="Input video file"),
+    dataset_root: Path = typer.Argument(..., help="Destination dataset directory"),
+    overwrite: bool = typer.Option(False, "--overwrite", "-f", help="Replace existing portrait/frames if present"),
+) -> None:
+    """Extract frames and portrait image for dataset ingestion."""
 
-    video_path = opts.video.expanduser()
-    dataset_root = opts.dataset_root.expanduser()
+    video = video.expanduser()
+    dataset_root = dataset_root.expanduser()
 
-    if not video_path.is_file():
-        print(f"error: video file not found: {video_path}", file=sys.stderr)
-        sys.exit(1)
+    if not video.is_file():
+        abort(f"video file not found: {video}")
 
-    name = slugify(opts.name) if opts.name else slugify(video_path.stem)
+    slug = slugify(video.stem)
+    frames_dir = decode_video(video, dataset_root, name=slug, overwrite=overwrite)
 
-    decode_video(video_path, dataset_root, name=name, overwrite=opts.overwrite)
+    typer.echo(f"Decoded frames to {frames_dir} and portrait to {dataset_root / (slug + '.png')}")
+
+
+def main() -> None:
+    app()
 
 
 if __name__ == "__main__":
     main()
-
