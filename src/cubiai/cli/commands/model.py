@@ -22,6 +22,12 @@ def train(
         data_root: Path = typer.Argument(..., help="Dataset with portrait.png + portrait_video/frame.png"),
         workdir: Path = typer.Argument(Path("runs/animator"), help="Where to save artifacts"),
         size: int = typer.Option(1024, help="High-resolution size"),
+        steps: int | None = typer.Option(
+            None,
+            "--steps",
+            help="Optional upper bound on optimisation steps",
+            show_default=False,
+        ),
         batch: int = typer.Option(1, help="Batch size"),
         epochs: int = typer.Option(10, help="Total dataset passes"),
         lr: float = typer.Option(2e-4, help="Learning rate"),
@@ -35,6 +41,16 @@ def train(
     device = torch.device(device)
     dataloader = create_dataloader(data_root, size=size, batch_size=batch, num_workers=num_workers)
 
+    try:
+        batches_per_epoch = len(dataloader)
+    except TypeError as exc:  # pragma: no cover - defensive fallback
+        raise RuntimeError("Dataloader must have a finite length to schedule training.") from exc
+
+    if batches_per_epoch == 0:
+        raise ValueError(
+            "No batches available. Reduce batch size or adjust dataset configuration."
+        )
+
     model = Animator()
     trainer = PassThroughTrainer(model, lr=lr, device=device)
     cfg = TrainerConfig(
@@ -43,10 +59,12 @@ def train(
     )
 
     checkpoint_path = workdir / "animator.pt"
+    resume_step = 0
     if checkpoint_path.exists():
         raw_state = torch.load(checkpoint_path, map_location=device)
         trainer.load_state_dict(raw_state)
         if isinstance(raw_state, dict) and "model" in raw_state:
+            resume_step = int(raw_state.get("step", 0))
             if raw_state.get("optimizer"):
                 typer.echo(f"Resumed model and optimizer from {checkpoint_path}")
             else:
@@ -54,30 +72,83 @@ def train(
         else:
             typer.echo(f"Loaded model weights from {checkpoint_path} (optimizer reset)")
 
+    if steps is not None and steps < 0:
+        raise ValueError("`--steps` must be non-negative")
     if epochs < 0:
         raise ValueError("`--epochs` must be non-negative")
 
+    target_steps = steps if steps is not None else epochs * batches_per_epoch
+    global_step = resume_step
+    trained_steps = 0
+
+    remaining_steps = max(target_steps - global_step, 0)
+    completed_epochs = global_step // batches_per_epoch if batches_per_epoch > 0 else 0
+    remaining_epochs_from_epochs = max(epochs - completed_epochs, 0)
+    required_epochs_for_steps = (
+        math.ceil(remaining_steps / batches_per_epoch) if remaining_steps > 0 else 0
+    )
+
+    if steps is not None:
+        epochs_to_run = max(required_epochs_for_steps, remaining_epochs_from_epochs)
+    else:
+        epochs_to_run = remaining_epochs_from_epochs
+
+    if target_steps == 0:
+        epochs_to_run = 0
+
+    progress_total = target_steps if target_steps > 0 else None
+    progress_initial = (
+        min(global_step, target_steps)
+        if progress_total is not None
+        else global_step
+    )
+
+    progress = tqdm(
+        total=progress_total,
+        desc="training",
+        unit="step",
+        dynamic_ncols=True,
+        initial=progress_initial,
+    )
 
     start_time = perf_counter()
-    progress = tqdm(range(epochs), desc="epochs")
-    for _ in progress:
-        for batch_data in dataloader:
-            metrics = trainer.training_step(batch_data, cfg)
 
-            progress.set_postfix(
-                {k: f"{v:.3f}" for k, v in metrics.items()}, refresh=False
-            )
+    if target_steps == 0 or global_step >= target_steps:
+        typer.echo("Checkpoint already covers the requested training budget; skipping training loop.")
+    else:
+        for _ in range(epochs_to_run):
+            if global_step >= target_steps:
+                break
+
+            for batch_data in dataloader:
+                if global_step >= target_steps:
+                    break
+
+                metrics = trainer.training_step(batch_data, cfg)
+                global_step += 1
+                trained_steps += 1
+
+                progress.update(1)
+                if global_step % 50 == 0:
+                    progress.set_postfix(
+                        {k: f"{v:.3f}" for k, v in metrics.items()}, refresh=False
+                    )
 
     progress.close()
 
     total_elapsed = perf_counter() - start_time
-    typer.echo(
-        f"training finished in {total_elapsed:0.1f}s over {trained_steps} new steps (total {global_step})"
-    )
+    if trained_steps > 0:
+        typer.echo(
+            f"training finished in {total_elapsed:0.1f}s over {trained_steps} new steps (total {global_step})"
+        )
+    else:
+        typer.echo("No new training steps were required.")
     # Save checkpoint and quick preview
     workdir.mkdir(parents=True, exist_ok=True)
     checkpoint_payload = trainer.state_dict()
+    checkpoint_payload["step"] = global_step
     checkpoint_payload["config"] = {
+        "steps": steps,
         "epochs": epochs,
         "lr": lr,
         "batch": batch,

@@ -13,7 +13,7 @@ Train the Animator on a portrait/driver dataset.
 
 ```bash
 uv run cubiai model train ./dataset ./runs/animator \
-    --size 1024 --steps 2000 --batch 1 \
+    --size 1024 --epochs 10 --batch 1 \
     --lambda-align 0.3 --lambda-motion 0.1 \
     --device cuda
 ```
@@ -25,14 +25,14 @@ uv run cubiai model train ./dataset ./runs/animator \
 **Options**
 - `--size`: Crop/resize resolution for training samples (default `1024`).
 - `--steps`: Optional total optimisation steps. When provided, training (and resume) continues until this budget is consumed.
-- `--epochs`: Total dataset passes to target when `--steps` is omitted (defaults to `1`).
+- `--epochs`: Total dataset passes to target (defaults to `10`).
 - `--batch`: Mini-batch size (defaults to `1`).
 - `--lr`: Learning rate for AdamW.
 - `--lambda-align`, `--lambda-motion`: Loss weights controlling driver alignment and motion smoothness trade-offs.
 - `--device`: Torch device string (`cuda`, `mps`, `cpu`).
 - `--num-workers`: Dataloader workers.
 
-Training prints metrics every 50 steps and saves `animator.pt` plus a preview render under the workdir. The CLI automatically resumes training from this checkpoint—restoring the optimizer state and continuing until the requested step or epoch budget is met.
+Training prints metrics every 50 steps and saves `animator.pt` plus a preview render under the workdir. The CLI automatically resumes training from this checkpoint—restoring the optimizer state and continuing until the requested epoch or step budget is met.
 
 ## `cubiai model infer`
 Render a single portrait/driver pair using a saved checkpoint.
@@ -55,7 +55,7 @@ uv run cubiai model infer portrait.png driver.png \
 No external credentials are required today. Future integrations (e.g., remote descriptor services) will document additional environment variables here.
 
 ## Tips
-- Use `uv run cubiai model train ... --steps <small>` for quick smoke tests.
+- Use `uv run cubiai model train ... --steps <small>` for precise short runs, or `--epochs <small>` for quick smoke tests.
 - Keep datasets on fast storage; each frame is loaded from disk per step.
 - Enable mixed precision manually by wrapping the training loop once the PyTorch version is confirmed.
 - After large refactors, regenerate previews (`cubiai model infer`) to ensure checkpoints still load correctly.

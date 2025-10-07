@@ -48,7 +48,7 @@ config/             Example YAML configs for training and experiments
 2. Train the animator:
    ```bash
    uv run cubiai model train ./dataset ./runs/animator \
-       --size 1024 --steps 2000 --batch 1 \
+       --size 1024 --epochs 10 --batch 1 \
        --lambda-align 0.3 --lambda-motion 0.1
    ```
 3. Run inference on a portrait/driver pair:
@@ -58,9 +58,9 @@ config/             Example YAML configs for training and experiments
        --output ./outputs/preview.png
    ```
 
-The CLI saves intermediate metrics every 50 steps and writes the trained weights to the specified `workdir`. Rerunning the train command automatically resumes from the saved checkpoint (including optimizer state) until the requested step or epoch budget is reached.
+The CLI saves intermediate metrics every 50 steps and writes the trained weights to the specified `workdir`. Rerunning the train command automatically resumes from the saved checkpoint (including optimizer state) and continues until the requested budget is reached (`--epochs`, default `10`, or `--steps` when supplied).
 
-Omit `--steps` to run for the specified number of epochs (default `1`). Provide `--steps` when you want to cap total optimisation steps across resumptions.
+Add `--steps <total>` if you prefer to cap optimisation by step count rather than epochs.
 
 ## Key Concepts
 - **Motion Descriptor Alignment** – Design or learn a representation that captures head pose and expression changes uniformly across domains (anime, real, parser output). Future releases will replace raw RGB conditioning with these descriptors.
