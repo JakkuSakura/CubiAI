@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 import numpy as np
 import torch
@@ -276,6 +276,30 @@ class PassThroughTrainer:
         self.device = torch.device(device)
         self.model = model.to(self.device)
         self.opt = torch.optim.AdamW(self.model.parameters(), lr=lr, betas=(0.5, 0.999), weight_decay=1e-4)
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {
+            "model": self.model.state_dict(),
+            "optimizer": self.opt.state_dict(),
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        if "model" in state:
+            model_state = state["model"]
+        else:
+            model_state = state
+        self.model.load_state_dict(model_state)
+
+        opt_state = state.get("optimizer") if isinstance(state, dict) else None
+        if opt_state:
+            self.opt.load_state_dict(opt_state)
+            self._move_optimizer_state_to_device()
+
+    def _move_optimizer_state_to_device(self) -> None:
+        for param_state in self.opt.state.values():
+            for key, value in param_state.items():
+                if isinstance(value, torch.Tensor):
+                    param_state[key] = value.to(self.device)
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], cfg: TrainerConfig) -> Dict[str, float]:
         src, drv, tgt, domain = batch

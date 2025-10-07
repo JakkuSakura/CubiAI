@@ -58,7 +58,9 @@ config/             Example YAML configs for training and experiments
        --output ./outputs/preview.png
    ```
 
-The CLI saves intermediate metrics every 50 steps and writes the trained weights to the specified `workdir`.
+The CLI saves intermediate metrics every 50 steps and writes the trained weights to the specified `workdir`. Rerunning the train command automatically resumes from the saved checkpoint (including optimizer state) until the requested step or epoch budget is reached.
+
+Omit `--steps` to run for the specified number of epochs (default `1`). Provide `--steps` when you want to cap total optimisation steps across resumptions.
 
 ## Key Concepts
 - **Motion Descriptor Alignment** – Design or learn a representation that captures head pose and expression changes uniformly across domains (anime, real, parser output). Future releases will replace raw RGB conditioning with these descriptors.

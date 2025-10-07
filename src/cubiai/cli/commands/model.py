@@ -1,6 +1,7 @@
 """CLI commands for the animator model."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from time import perf_counter
 
@@ -21,9 +22,8 @@ def train(
         data_root: Path = typer.Argument(..., help="Dataset with portrait.png + portrait_video/frame.png"),
         workdir: Path = typer.Argument(Path("runs/animator"), help="Where to save artifacts"),
         size: int = typer.Option(1024, help="High-resolution size"),
-        steps: int = typer.Option(200, help="Total optimisation steps"),
         batch: int = typer.Option(1, help="Batch size"),
-        epochs: int = typer.Option(1, help="Epochs (upper bound if dataset small)"),
+        epochs: int = typer.Option(10, help="Total dataset passes"),
         lr: float = typer.Option(2e-4, help="Learning rate"),
         lambda_align: float = typer.Option(0.3, help="Weight for driver-aligned motion"),
         lambda_motion: float = typer.Option(0.1, help="Weight for motion magnitude penalty"),
@@ -32,7 +32,9 @@ def train(
 ) -> None:
     """Train the animator on the given dataset."""
 
+    device = torch.device(device)
     dataloader = create_dataloader(data_root, size=size, batch_size=batch, num_workers=num_workers)
+
     model = Animator()
     trainer = PassThroughTrainer(model, lr=lr, device=device)
     cfg = TrainerConfig(
@@ -40,44 +42,51 @@ def train(
         lambda_motion=lambda_motion,
     )
 
-    global_step = 0
+    checkpoint_path = workdir / "animator.pt"
+    if checkpoint_path.exists():
+        raw_state = torch.load(checkpoint_path, map_location=device)
+        trainer.load_state_dict(raw_state)
+        if isinstance(raw_state, dict) and "model" in raw_state:
+            if raw_state.get("optimizer"):
+                typer.echo(f"Resumed model and optimizer from {checkpoint_path}")
+            else:
+                typer.echo(f"Resumed model from {checkpoint_path} (optimizer reset)")
+        else:
+            typer.echo(f"Loaded model weights from {checkpoint_path} (optimizer reset)")
+
+    if epochs < 0:
+        raise ValueError("`--epochs` must be non-negative")
+
+
     start_time = perf_counter()
-
-    progress = tqdm(total=steps, desc="training", unit="step", dynamic_ncols=True)
-
-    for epoch in range(epochs):
+    progress = tqdm(range(epochs), desc="epochs")
+    for _ in tqdm(range(epochs), desc="epochs"):
         for batch_data in dataloader:
             metrics = trainer.training_step(batch_data, cfg)
-            global_step += 1
 
-            progress.update(1)
-            if global_step % 50 == 0:
-                progress.set_postfix(
-                    {k: f"{v:.3f}" for k, v in metrics.items()}, refresh=False
-                )
-
-            elif global_step % 50 == 0:
-                elapsed = perf_counter() - start_time
-                rate = elapsed / global_step if global_step > 0 else 0.0
-                remaining = max(steps - global_step, 0)
-                eta = remaining * rate
-                typer.echo(
-                    f"step {global_step}/{steps} | eta {eta:0.1f}s | metrics {metrics}"
-                )
-
-            if global_step >= steps:
-                break
-        if global_step >= steps:
-            break
+            progress.set_postfix(
+                {k: f"{v:.3f}" for k, v in metrics.items()}, refresh=False
+            )
 
     progress.close()
 
     total_elapsed = perf_counter() - start_time
-    typer.echo(f"training finished in {total_elapsed:0.1f}s over {global_step} steps")
-
+    typer.echo(
+        f"training finished in {total_elapsed:0.1f}s over {trained_steps} new steps (total {global_step})"
+    )
     # Save checkpoint and quick preview
     workdir.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), workdir / "animator.pt")
+    checkpoint_payload = trainer.state_dict()
+    checkpoint_payload["config"] = {
+        "epochs": epochs,
+        "lr": lr,
+        "batch": batch,
+        "lambda_align": lambda_align,
+        "lambda_motion": lambda_motion,
+        "lambda_identity": cfg.lambda_identity,
+        "device": str(device),
+    }
+    torch.save(checkpoint_payload, checkpoint_path)
 
     sample = next(iter(dataloader))
     if not isinstance(sample, (list, tuple)):
@@ -140,6 +149,8 @@ def infer(
 
     model = Animator()
     state = torch.load(checkpoint, map_location=device)
+    if isinstance(state, dict) and "model" in state:
+        state = state["model"]
     model.load_state_dict(state)
     model = model.to(device)
 

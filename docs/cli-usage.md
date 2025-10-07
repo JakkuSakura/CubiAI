@@ -24,15 +24,15 @@ uv run cubiai model train ./dataset ./runs/animator \
 
 **Options**
 - `--size`: Crop/resize resolution for training samples (default `1024`).
-- `--steps`: Maximum optimisation steps; training stops early if the dataloader exhausts first.
-- `--epochs`: Hard upper bound on dataset passes.
+- `--steps`: Optional total optimisation steps. When provided, training (and resume) continues until this budget is consumed.
+- `--epochs`: Total dataset passes to target when `--steps` is omitted (defaults to `1`).
 - `--batch`: Mini-batch size (defaults to `1`).
 - `--lr`: Learning rate for AdamW.
 - `--lambda-align`, `--lambda-motion`: Loss weights controlling driver alignment and motion smoothness trade-offs.
 - `--device`: Torch device string (`cuda`, `mps`, `cpu`).
 - `--num-workers`: Dataloader workers.
 
-Training prints metrics every 50 steps and saves `animator.pt` plus a preview render under the workdir.
+Training prints metrics every 50 steps and saves `animator.pt` plus a preview render under the workdir. The CLI automatically resumes training from this checkpoint—restoring the optimizer state and continuing until the requested step or epoch budget is met.
 
 ## `cubiai model infer`
 Render a single portrait/driver pair using a saved checkpoint.
